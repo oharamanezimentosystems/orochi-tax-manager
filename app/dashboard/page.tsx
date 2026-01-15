@@ -25,7 +25,16 @@ export default function Dashboard() {
   const [clients, setClients] = useState<ClientData[]>([]);
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [selectedYear, setSelectedYear] = useState(2026);
+  const [selectedYear, setSelectedYear] = useState(() => {
+    const today = new Date();
+    const currentMonth = today.getMonth() + 1; // 1-12月
+    const currentFullYear = today.getFullYear();
+    
+    // 1月～3月は「前年（2025年）」の確定申告時期なので前年をデフォルトに
+    if (currentMonth <= 3) return currentFullYear - 1;
+    // 4月以降は「今年（2026年）」
+    return currentFullYear;
+  });
 
   // モーダル管理
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);

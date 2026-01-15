@@ -233,17 +233,34 @@ function DetailContent() {
   const clientId = searchParams.get('id');
   const urlYear = searchParams.get('year');
 
-  // ★ 改善1 & 2: 年の初期値を自動判定 (1～3月は前年、4月以降は本年)
+  // ★ 年度と期の初期値自動判定ロジック
   const [currentYear, setCurrentYear] = useState(() => {
     if (urlYear) return parseInt(urlYear);
     const today = new Date();
     const currentMonth = today.getMonth() + 1; // 1-12
     const currentFullYear = today.getFullYear();
-    // 1月, 2月, 3月は前年の確定申告時期なので、デフォルトを前年にする
-    return currentMonth <= 3 ? currentFullYear - 1 : currentFullYear;
+    // 1～3月は「前年」の確定申告時期 -> 前年を表示
+    if (currentMonth <= 3) return currentFullYear - 1;
+    // 4月以降は「今年」を表示
+    return currentFullYear;
   });
 
-  const [activeTerm, setActiveTerm] = useState(1);
+  const [activeTerm, setActiveTerm] = useState(() => {
+    const today = new Date();
+    const currentMonth = today.getMonth() + 1;
+    
+    // 1～3月は前年の第3期（決算）を開く
+    if (currentMonth <= 3) return 3;
+    
+    // それ以外は現在の月に応じた期を開く
+    // 第1期: 1,2,3,4,5月 (ただし1-3月は前年判定でreturn済みなので、ここは4-5月用)
+    if (currentMonth <= 5) return 1;
+    // 第2期: 6,7,8,9月
+    if (currentMonth <= 9) return 2;
+    // 第3期: 10,11,12月
+    return 3;
+  });
+
   const [clientName, setClientName] = useState('');
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -511,13 +528,13 @@ function DetailContent() {
                 <div className="text-[10px] text-gray-400 mb-0.5">税理士小原司事務所</div>
                 <h1 className="text-2xl font-bold flex items-center gap-2 mb-2">{clientName}</h1>
                 
-                {/* ★ 改善1: 年の表示を目立たせる */}
-                <div className="flex items-center gap-2 bg-yellow-500/10 p-2 rounded border border-yellow-500/50">
-                  <span className="text-xs text-yellow-300 font-bold px-1">対象年度</span>
+                {/* ★ 年の表示を目立たせる */}
+                <div className="flex items-center gap-2 bg-yellow-500/10 p-2 rounded border-2 border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)]">
+                  <span className="text-xs text-yellow-300 font-bold px-1 uppercase tracking-wider">対象年度</span>
                   <select 
                     value={currentYear} 
                     onChange={(e) => handleYearChange(Number(e.target.value))}
-                    className="bg-transparent border-none text-yellow-400 text-3xl font-bold focus:ring-0 cursor-pointer hover:text-yellow-300 transition-colors"
+                    className="bg-transparent border-none text-yellow-400 text-3xl font-extrabold focus:ring-0 cursor-pointer hover:text-yellow-300 transition-colors"
                     style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
                   >
                     <option value={2025} className="bg-gray-800 text-lg">2025年度</option>
@@ -546,12 +563,32 @@ function DetailContent() {
             </div>
           </div>
 
-          <div className="flex border-b border-gray-700 mb-4">
-            {[1, 2, 3].map((term) => (
-              <button key={term} onClick={() => handleTabChange(term)} className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${activeTerm === term ? 'border-blue-500 text-blue-400 bg-gray-800/50' : 'border-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-800/30'}`}>
-                第{term}期 ({TERM_MONTHS[term as keyof typeof TERM_MONTHS][0]}月～{TERM_MONTHS[term as keyof typeof TERM_MONTHS][TERM_MONTHS[term as keyof typeof TERM_MONTHS].length-1]}月)
-              </button>
-            ))}
+          {/* ★ 期タブの改善: 大きく目立たせ、選択中の期を明確にする */}
+          <div className="flex gap-2 mb-6 p-1 bg-gray-800 rounded-lg border border-gray-700">
+            {[1, 2, 3].map((term) => {
+                const isActive = activeTerm === term;
+                const monthsText = `${TERM_MONTHS[term as keyof typeof TERM_MONTHS][0]}月～${TERM_MONTHS[term as keyof typeof TERM_MONTHS][TERM_MONTHS[term as keyof typeof TERM_MONTHS].length-1]}月`;
+                const termLabel = term === 3 ? "決算・確定申告" : `第${term}期`;
+                
+                return (
+                  <button 
+                    key={term} 
+                    onClick={() => handleTabChange(term)} 
+                    className={`flex-1 py-3 px-4 rounded-md transition-all duration-200 flex flex-col items-center justify-center gap-1
+                        ${isActive 
+                            ? 'bg-blue-600 text-white shadow-lg transform scale-[1.02] border border-blue-400 ring-2 ring-blue-500/30 font-bold z-10' 
+                            : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/50'
+                        }`}
+                  >
+                    <span className={`text-xs ${isActive ? 'text-blue-100 opacity-90' : 'text-gray-500'}`}>
+                        {monthsText}
+                    </span>
+                    <span className={`text-lg ${isActive ? 'text-white' : ''}`}>
+                        {termLabel}
+                    </span>
+                  </button>
+                );
+            })}
           </div>
 
           <div className="bg-gray-800 rounded border border-gray-700 overflow-hidden shadow-xl mb-8">
@@ -566,7 +603,6 @@ function DetailContent() {
                     </button>
                   )}
                 </div>
-                {/* ★ 改善4: 入力欄の白化に伴う注記変更 */}
                 <span className="text-[10px] text-gray-400 bg-gray-700 px-2 py-0.5 rounded border border-gray-600">※空欄の箇所に入力してください</span>
             </div>
             <table className="w-full text-left border-collapse">
@@ -574,7 +610,7 @@ function DetailContent() {
                 <tr className="bg-gray-900 text-gray-400 text-xs border-b border-gray-700">
                   <th className="px-2 py-2 w-10 text-center border-r border-gray-700">No</th>
                   <th className="px-3 py-2 border-r border-gray-700">確認項目</th>
-                  {/* ★ 改善3: 「顧問先入力」→「お客様入力欄」に変更 */}
+                  {/* ★ 「お客様入力欄」に変更 */}
                   <th className="px-2 py-2 w-32 border-r border-gray-700 bg-blue-900/20 text-blue-200 font-bold border-b-2 border-blue-500">
                     お客様入力欄
                   </th>
@@ -618,7 +654,7 @@ function DetailContent() {
                       </td>
                       
                       <td className="px-2 py-2 border-r border-gray-700 align-top pt-3 bg-gray-800/20">
-                        {/* ★ 改善4: 入力欄を白（または明るい色）にして視認性を向上 */}
+                        {/* ★ 入力欄を白（または明るい色）にして視認性を向上 */}
                         {task.type === 'textarea' ? (
                             <textarea 
                               value={task.clientInput || ''} 
