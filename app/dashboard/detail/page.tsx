@@ -19,7 +19,7 @@ const TERM_MONTHS = {
 // ★通常タスク (No.1～13)
 const INITIAL_TASKS = [
   { 
-    no: "1", name: '連携の認証の切れた預金・カードの再認証', clientInput: '不要', officeStatus: 'OK',
+    no: "1", name: '連携の認証の切れた預金・カードの再認証', clientInput: '', officeStatus: '未',
     manual: `<div class="note"><p><i class="fas fa-exclamation-triangle"></i> <strong>注意：</strong> 再認証を長期間行わないと、明細が取得できなくなり、月次処理に支障が出ます。</p></div><p><strong>手順：</strong></p><ol><li>マネーフォワードのトップページや「口座」メニューから連携口座一覧を表示します。</li><li>エラーが表示されている口座（「要再認証」など）の「<span class="action-target">再認証</span>」または「<span class="action-target">更新</span>」ボタンをクリックします。</li><li>画面の指示に従い、金融機関のサイトでID・パスワード等を入力して再認証を完了させてください。</li></ol>` 
   },
   { 
@@ -232,7 +232,16 @@ function DetailContent() {
   const searchParams = useSearchParams();
   const clientId = searchParams.get('id');
   const urlYear = searchParams.get('year');
-  const [currentYear, setCurrentYear] = useState(urlYear ? parseInt(urlYear) : 2026);
+
+  // ★ 改善1 & 2: 年の初期値を自動判定 (1～3月は前年、4月以降は本年)
+  const [currentYear, setCurrentYear] = useState(() => {
+    if (urlYear) return parseInt(urlYear);
+    const today = new Date();
+    const currentMonth = today.getMonth() + 1; // 1-12
+    const currentFullYear = today.getFullYear();
+    // 1月, 2月, 3月は前年の確定申告時期なので、デフォルトを前年にする
+    return currentMonth <= 3 ? currentFullYear - 1 : currentFullYear;
+  });
 
   const [activeTerm, setActiveTerm] = useState(1);
   const [clientName, setClientName] = useState('');
@@ -493,24 +502,29 @@ function DetailContent() {
     <div className="min-h-screen bg-gray-900 text-white p-4 flex flex-col">
       <div className="flex-grow">
           {/* ヘッダー */}
-          <div className="mb-4 flex items-center justify-between border-b border-gray-800 pb-4">
-            <div className="flex items-center gap-4">
+          <div className="mb-6 flex items-center justify-between border-b border-gray-800 pb-4">
+            <div className="flex items-center gap-6">
               {isAdmin && (
                 <button onClick={() => router.push('/dashboard')} className="text-gray-400 hover:text-white flex items-center text-sm transition-colors border border-gray-700 px-3 py-1 rounded">← 一覧</button>
               )}
               <div>
                 <div className="text-[10px] text-gray-400 mb-0.5">税理士小原司事務所</div>
-                <h1 className="text-xl font-bold flex items-center gap-2">{clientName}</h1>
-                <div className="mt-1">
+                <h1 className="text-2xl font-bold flex items-center gap-2 mb-2">{clientName}</h1>
+                
+                {/* ★ 改善1: 年の表示を目立たせる */}
+                <div className="flex items-center gap-2 bg-yellow-500/10 p-2 rounded border border-yellow-500/50">
+                  <span className="text-xs text-yellow-300 font-bold px-1">対象年度</span>
                   <select 
                     value={currentYear} 
                     onChange={(e) => handleYearChange(Number(e.target.value))}
-                    className="bg-gray-800 border border-gray-600 text-white text-xs rounded px-2 py-1 focus:ring-1 focus:ring-blue-500"
+                    className="bg-transparent border-none text-yellow-400 text-3xl font-bold focus:ring-0 cursor-pointer hover:text-yellow-300 transition-colors"
+                    style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
                   >
-                    <option value={2025}>2025年度</option>
-                    <option value={2026}>2026年度</option>
-                    <option value={2027}>2027年度</option>
+                    <option value={2025} className="bg-gray-800 text-lg">2025年度</option>
+                    <option value={2026} className="bg-gray-800 text-lg">2026年度</option>
+                    <option value={2027} className="bg-gray-800 text-lg">2027年度</option>
                   </select>
+                  <span className="text-yellow-500 text-sm ml-[-5px]">▼</span>
                 </div>
               </div>
             </div>
@@ -552,14 +566,18 @@ function DetailContent() {
                     </button>
                   )}
                 </div>
-                <span className="text-[10px] text-yellow-500 bg-yellow-900/20 px-2 py-0.5 rounded border border-yellow-800">※黄色セルは入力必須</span>
+                {/* ★ 改善4: 入力欄の白化に伴う注記変更 */}
+                <span className="text-[10px] text-gray-400 bg-gray-700 px-2 py-0.5 rounded border border-gray-600">※空欄の箇所に入力してください</span>
             </div>
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-gray-900 text-gray-400 text-xs border-b border-gray-700">
                   <th className="px-2 py-2 w-10 text-center border-r border-gray-700">No</th>
                   <th className="px-3 py-2 border-r border-gray-700">確認項目</th>
-                  <th className="px-2 py-2 w-32 border-r border-gray-700">顧問先入力</th>
+                  {/* ★ 改善3: 「顧問先入力」→「お客様入力欄」に変更 */}
+                  <th className="px-2 py-2 w-32 border-r border-gray-700 bg-blue-900/20 text-blue-200 font-bold border-b-2 border-blue-500">
+                    お客様入力欄
+                  </th>
                   <th className="px-2 py-2 w-24 border-r border-gray-700">事務所判定</th>
                   <th className="px-3 py-2 w-64">管理者メモ</th>
                 </tr>
@@ -599,11 +617,34 @@ function DetailContent() {
                         </div>
                       </td>
                       
-                      <td className="px-2 py-2 border-r border-gray-700 align-top pt-3">
+                      <td className="px-2 py-2 border-r border-gray-700 align-top pt-3 bg-gray-800/20">
+                        {/* ★ 改善4: 入力欄を白（または明るい色）にして視認性を向上 */}
                         {task.type === 'textarea' ? (
-                            <textarea value={task.clientInput || ''} onChange={(e) => handleInputChange(index, 'clientInput', e.target.value)} className="w-full text-xs px-2 py-1 rounded border focus:outline-none focus:ring-1 focus:ring-blue-500 bg-gray-700 border-gray-600 text-white" style={{ minHeight: '120px', lineHeight: '1.4' }} placeholder="PC購入(15万)、○○システム前払い等" />
+                            <textarea 
+                              value={task.clientInput || ''} 
+                              onChange={(e) => handleInputChange(index, 'clientInput', e.target.value)} 
+                              className={`w-full text-xs px-2 py-1 rounded border focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 border-gray-300 placeholder-gray-400 shadow-inner`} 
+                              style={{ minHeight: '120px', lineHeight: '1.4' }} 
+                              placeholder="PC購入(15万)、○○システム前払い等" 
+                            />
                         ) : (
-                            <input type="text" value={task.clientInput || ''} readOnly={task.type === 'sales_input' || task.type === 'sales_check'} onChange={(e) => handleInputChange(index, 'clientInput', e.target.value)} className={`w-full text-xs px-2 py-1 rounded border focus:outline-none focus:ring-1 focus:ring-blue-500 h-7 ${(task.type === 'sales_input' || task.type === 'sales_check') ? 'bg-gray-900 border-gray-800 text-gray-400 cursor-not-allowed' : task.clientInput ? 'bg-gray-700 border-gray-600 text-white' : 'bg-yellow-900/20 border-yellow-700/50 text-yellow-200 placeholder-yellow-700'}`} placeholder={(task.type === 'sales_input' || task.type === 'sales_check') ? "ボタンから入力" : ""} />
+                            <input 
+                              type="text" 
+                              value={task.clientInput || ''} 
+                              readOnly={task.type === 'sales_input' || task.type === 'sales_check'} 
+                              onChange={(e) => handleInputChange(index, 'clientInput', e.target.value)} 
+                              className={`w-full text-xs px-2 py-1 rounded border focus:outline-none focus:ring-2 focus:ring-blue-500 h-8 shadow-inner transition-all
+                                ${(task.type === 'sales_input' || task.type === 'sales_check') 
+                                  ? 'bg-gray-900 border-gray-700 text-gray-400 cursor-pointer hover:bg-gray-800' 
+                                  : task.clientInput 
+                                    ? 'bg-white border-gray-300 text-gray-900' // 入力済み：白背景・黒文字
+                                    : 'bg-white border-yellow-500/70 text-gray-900 placeholder-gray-400 ring-2 ring-yellow-500/20' // 未入力：白背景・黄色枠線で強調
+                                }`} 
+                              placeholder={(task.type === 'sales_input' || task.type === 'sales_check') ? "ボタンから入力" : ""}
+                              onClick={() => {
+                                if(task.type === 'sales_input' || task.type === 'sales_check') setOpenInputId(openInputId === index ? null : index)
+                              }}
+                            />
                         )}
                       </td>
 
