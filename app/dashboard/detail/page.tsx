@@ -51,8 +51,9 @@ const INITIAL_TASKS = [
   { 
     no: "7", name: '売上仕入集計とMF損益計算書の比較確認（仕入差異チェック）', clientInput: '', officeStatus: '未',
     type: 'sales_check',
-    details: { mfData: {} },
-    manual: `<div class="attention"><p><strong><i class="fas fa-balance-scale"></i> 判定基準とロジック</strong></p><ul><li><strong>仕入（Purchases）：</strong> <span style="color:red;">重要チェック項目</span>です。クレカ連携ズレは数日程度のため、<strong>誤差10%以内</strong>であることを確認します。</li><li><strong>売上・手数料（Sales）：</strong> 入金サイクル（約2週間）のズレにより、単月では一致しません。</li></ul></div><div class="visual-aid-container" style="text-align:left;"><h4>手数料の差異について（理論値 vs 実数値）</h4><p>ECオロチの手数料（理論値）より、実際の入金から計算した手数料が<strong>安い（入金が多い）場合</strong>は、キャンペーン割引等の「有利差異」であるため、<strong>問題ありません。</strong></p><p>逆に、理論値よりも手数料が著しく高い（入金が少なすぎる）場合は、以下の原因を確認してください。</p><ul><li>返金・キャンセル処理の反映漏れ</li><li>その他、予期せぬペナルティや調整金の発生</li></ul></div>`
+    // ↓ adjustmentData（その他調整）を追加
+    details: { mfData: {}, adjustmentData: {} }, 
+    manual: `<div class="attention"><p><strong><i class="fas fa-balance-scale"></i> 判定基準とロジック</strong></p><ul><li><strong>仕入（Purchases）：</strong> <span style="color:red;">重要チェック項目</span>です。クレカ連携ズレは数日程度のため、<strong>誤差10%以内</strong>であることを確認します。</li><li><strong>売上・手数料（Sales）：</strong> 入金サイクル（約2週間）のズレにより、単月では一致しません。</li><li><strong>オロチ外の調整：</strong> 店舗売上や、オロチを経由しない仕入がある場合は「その他（オロチ外）」欄に入力して差異を調整してください。</li></ul></div>`
   },
   { 
     no: "8", name: 'MF未払金残高の過少・過大確認（マイナス残高等）', clientInput: '', officeStatus: '未',
@@ -233,31 +234,21 @@ function DetailContent() {
   const clientId = searchParams.get('id');
   const urlYear = searchParams.get('year');
 
-  // ★ 年度と期の初期値自動判定ロジック
   const [currentYear, setCurrentYear] = useState(() => {
     if (urlYear) return parseInt(urlYear);
     const today = new Date();
-    const currentMonth = today.getMonth() + 1; // 1-12
+    const currentMonth = today.getMonth() + 1; 
     const currentFullYear = today.getFullYear();
-    // 1～3月は「前年」の確定申告時期 -> 前年を表示
     if (currentMonth <= 3) return currentFullYear - 1;
-    // 4月以降は「今年」を表示
     return currentFullYear;
   });
 
   const [activeTerm, setActiveTerm] = useState(() => {
     const today = new Date();
     const currentMonth = today.getMonth() + 1;
-    
-    // 1～3月は前年の第3期（決算）を開く
     if (currentMonth <= 3) return 3;
-    
-    // それ以外は現在の月に応じた期を開く
-    // 第1期: 1,2,3,4,5月 (ただし1-3月は前年判定でreturn済みなので、ここは4-5月用)
     if (currentMonth <= 5) return 1;
-    // 第2期: 6,7,8,9月
     if (currentMonth <= 9) return 2;
-    // 第3期: 10,11,12月
     return 3;
   });
 
@@ -270,7 +261,6 @@ function DetailContent() {
   const [openManualId, setOpenManualId] = useState<number | null>(null);
   const [openInputId, setOpenInputId] = useState<number | null>(null);
   
-  // 顧問先ステータス
   const [clientStatus, setClientStatus] = useState<'未着手' | '進行中' | '完了'>('未着手');
 
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -306,18 +296,17 @@ function DetailContent() {
     fetchClientData();
   }, [clientId, router, isAdmin, currentYear]);
 
-  // 年度変更時に再ロード
   useEffect(() => {
     if (fullData) {
         loadTasksForTerm(fullData, activeTerm, currentYear);
     }
   }, [currentYear]);
 
+  // ★修正：読み込み時のundefined対策とマージ処理
   const loadTasksForTerm = (data: any, term: number, year: number) => {
     const termKey = `year_${year}_term${term}_tasks`;
     const savedTasks = data[termKey];
     
-    // 保存されたステータスを読み込む
     const statusKey = `year_${year}`;
     const termStatus = data[statusKey]?.[`term${term}`]?.clientStatus || '未着手';
     setClientStatus(termStatus);
@@ -331,12 +320,31 @@ function DetailContent() {
       const mergedTasks = baseTasks.map((initTask: any) => {
         const saved = savedTasks.find((t: any) => t.no === initTask.no);
         if (saved) {
+          // undefinedを防ぐためにデフォルト値を明示的に設定
+          const safeClientInput = saved.clientInput !== undefined ? saved.clientInput : '';
+          const safeOfficeStatus = saved.officeStatus !== undefined ? saved.officeStatus : '未';
+          const safeMemo = saved.memo !== undefined ? saved.memo : '';
+          
+          // 詳細データのマージ
+          let mergedDetails = saved.details || initTask.details;
+          
+          // Task 7の場合はadjustmentDataなどの構造を保証する
+          if (initTask.type === 'sales_check') {
+             mergedDetails = {
+                 ...initTask.details, // 初期構造
+                 ...(saved.details || {}) // 保存値を上書き
+             };
+             // adjustmentDataが保存データになければ初期化
+             if (!mergedDetails.adjustmentData) mergedDetails.adjustmentData = {};
+             if (!mergedDetails.mfData) mergedDetails.mfData = {};
+          }
+
           return { 
             ...initTask,
-            clientInput: saved.clientInput,
-            officeStatus: saved.officeStatus,
-            memo: saved.memo,
-            details: saved.details || initTask.details 
+            clientInput: safeClientInput,
+            officeStatus: safeOfficeStatus,
+            memo: safeMemo,
+            details: mergedDetails
           };
         }
         return initTask;
@@ -348,6 +356,7 @@ function DetailContent() {
     }
   };
 
+  // ★修正：保存時のサニタイズ処理（undefined除去）
   const saveDataToFirestore = async (currentTasks: any[], term: number, year: number, newClientStatus?: string) => {
     if (!clientId) return;
     setSaveStatus('saving');
@@ -367,8 +376,12 @@ function DetailContent() {
 
       const statusToSave = newClientStatus || clientStatus;
 
+      // ★重要：undefinedが含まれているとFirebaseがエラーを吐くため、
+      // JSON.stringify -> JSON.parse を通すことで undefined をキーごと削除する
+      const cleanTasks = JSON.parse(JSON.stringify(currentTasks));
+
       await updateDoc(docRef, {
-        [termKey]: currentTasks,
+        [termKey]: cleanTasks,
         [officeStatusKey]: newOfficeStatus,
         [clientStatusKey]: statusToSave
       });
@@ -397,7 +410,6 @@ function DetailContent() {
     }
   };
 
-  // 提出アクション
   const handleSubmit = async () => {
     if (!confirm('この期間の作業を完了とし、事務所へ提出しますか？')) return;
     setClientStatus('完了');
@@ -445,14 +457,25 @@ function DetailContent() {
 
   const handleOrochiDataChange = (taskIndex: number, month: number, shop: string, field: string, value: string) => {
     setSaveStatus('changed');
-    const newTasks = [...tasks];
-    const task = newTasks[taskIndex];
-    if (!task.details) task.details = { monthlyData: {} };
-    if (!task.details.monthlyData[month]) task.details.monthlyData[month] = {};
-    if (!task.details.monthlyData[month][shop]) task.details.monthlyData[month][shop] = {};
-    task.details.monthlyData[month][shop][field] = value === '' ? 0 : parseFloat(value);
-    task.clientInput = "詳細データ入力済";
-    
+    const newTasks = tasks.map((task, i) => {
+      if (i !== taskIndex) return task;
+      const newDetails = { 
+        ...task.details,
+        monthlyData: { ...task.details?.monthlyData } 
+      };
+      if(!newDetails.monthlyData[month]) newDetails.monthlyData[month] = {};
+      if(!newDetails.monthlyData[month][shop]) newDetails.monthlyData[month][shop] = {};
+
+      newDetails.monthlyData[month][shop] = { 
+        ...newDetails.monthlyData[month][shop],
+        [field]: value === '' ? 0 : parseFloat(value)
+      };
+      return {
+        ...task,
+        clientInput: "詳細データ入力済",
+        details: newDetails
+      };
+    });
     setTasks(newTasks);
     const newStatus = updateStatusToInProgress();
     triggerAutoSave(newTasks, newStatus);
@@ -460,12 +483,42 @@ function DetailContent() {
 
   const handleMfDataChange = (taskIndex: number, month: number, field: string, value: string) => {
     setSaveStatus('changed');
-    const newTasks = [...tasks];
-    const task = newTasks[taskIndex];
-    if (!task.details) task.details = { mfData: {} };
-    if (!task.details.mfData[month]) task.details.mfData[month] = {};
-    task.details.mfData[month][field] = value === '' ? 0 : parseFloat(value);
-    
+    const newTasks = tasks.map((task, i) => {
+      if (i !== taskIndex) return task;
+      const newDetails = {
+        ...task.details,
+        mfData: { ...task.details?.mfData }
+      };
+      if(!newDetails.mfData[month]) newDetails.mfData[month] = {};
+
+      newDetails.mfData[month] = {
+        ...newDetails.mfData[month],
+        [field]: value === '' ? 0 : parseFloat(value)
+      };
+      return { ...task, details: newDetails };
+    });
+    setTasks(newTasks);
+    const newStatus = updateStatusToInProgress();
+    triggerAutoSave(newTasks, newStatus);
+  };
+
+  // ★追加：その他調整データの入力ハンドラ
+  const handleAdjustmentDataChange = (taskIndex: number, month: number, field: string, value: string) => {
+    setSaveStatus('changed');
+    const newTasks = tasks.map((task, i) => {
+      if (i !== taskIndex) return task;
+      const newDetails = {
+        ...task.details,
+        adjustmentData: { ...task.details?.adjustmentData }
+      };
+      if(!newDetails.adjustmentData[month]) newDetails.adjustmentData[month] = {};
+
+      newDetails.adjustmentData[month] = {
+        ...newDetails.adjustmentData[month],
+        [field]: value === '' ? 0 : parseFloat(value)
+      };
+      return { ...task, details: newDetails };
+    });
     setTasks(newTasks);
     const newStatus = updateStatusToInProgress();
     triggerAutoSave(newTasks, newStatus);
@@ -518,7 +571,6 @@ function DetailContent() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4 flex flex-col">
       <div className="flex-grow">
-          {/* ヘッダー */}
           <div className="mb-6 flex items-center justify-between border-b border-gray-800 pb-4">
             <div className="flex items-center gap-6">
               {isAdmin && (
@@ -527,8 +579,6 @@ function DetailContent() {
               <div>
                 <div className="text-[10px] text-gray-400 mb-0.5">税理士小原司事務所</div>
                 <h1 className="text-2xl font-bold flex items-center gap-2 mb-2">{clientName}</h1>
-                
-                {/* ★ 年の表示を目立たせる */}
                 <div className="flex items-center gap-2 bg-yellow-500/10 p-2 rounded border-2 border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)]">
                   <span className="text-xs text-yellow-300 font-bold px-1 uppercase tracking-wider">対象年度</span>
                   <select 
@@ -556,14 +606,13 @@ function DetailContent() {
                       {clientStatus}
                   </span>
               </div>
-              
               {saveStatus === 'saved' && <span className="text-sm text-gray-500 flex items-center gap-1 ml-2"><span className="w-2 h-2 bg-green-500 rounded-full"></span> 保存済</span>}
               {saveStatus === 'saving' && <span className="text-sm text-blue-400 flex items-center gap-1 ml-2 animate-pulse"><span className="w-2 h-2 bg-blue-400 rounded-full"></span> 保存中</span>}
               {saveStatus === 'changed' && <span className="text-sm text-yellow-500 flex items-center gap-1 ml-2"><span className="w-2 h-2 bg-yellow-500 rounded-full"></span> 待機中</span>}
+              {saveStatus === 'error' && <span className="text-sm text-red-500 flex items-center gap-1 ml-2"><span className="w-2 h-2 bg-red-500 rounded-full"></span> エラー</span>}
             </div>
           </div>
 
-          {/* ★ 期タブの改善: 大きく目立たせ、選択中の期を明確にする */}
           <div className="flex gap-2 mb-6 p-1 bg-gray-800 rounded-lg border border-gray-700">
             {[1, 2, 3].map((term) => {
                 const isActive = activeTerm === term;
@@ -610,7 +659,6 @@ function DetailContent() {
                 <tr className="bg-gray-900 text-gray-400 text-xs border-b border-gray-700">
                   <th className="px-2 py-2 w-10 text-center border-r border-gray-700">No</th>
                   <th className="px-3 py-2 border-r border-gray-700">確認項目</th>
-                  {/* ★ 「お客様入力欄」に変更 */}
                   <th className="px-2 py-2 w-32 border-r border-gray-700 bg-blue-900/20 text-blue-200 font-bold border-b-2 border-blue-500">
                     お客様入力欄
                   </th>
@@ -654,7 +702,6 @@ function DetailContent() {
                       </td>
                       
                       <td className="px-2 py-2 border-r border-gray-700 align-top pt-3 bg-gray-800/20">
-                        {/* ★ 入力欄を白（または明るい色）にして視認性を向上 */}
                         {task.type === 'textarea' ? (
                             <textarea 
                               value={task.clientInput || ''} 
@@ -673,8 +720,8 @@ function DetailContent() {
                                 ${(task.type === 'sales_input' || task.type === 'sales_check') 
                                   ? 'bg-gray-900 border-gray-700 text-gray-400 cursor-pointer hover:bg-gray-800' 
                                   : task.clientInput 
-                                    ? 'bg-white border-gray-300 text-gray-900' // 入力済み：白背景・黒文字
-                                    : 'bg-white border-yellow-500/70 text-gray-900 placeholder-gray-400 ring-2 ring-yellow-500/20' // 未入力：白背景・黄色枠線で強調
+                                    ? 'bg-white border-gray-300 text-gray-900' 
+                                    : 'bg-white border-yellow-500/70 text-gray-900 placeholder-gray-400 ring-2 ring-yellow-500/20' 
                                 }`} 
                               placeholder={(task.type === 'sales_input' || task.type === 'sales_check') ? "ボタンから入力" : ""}
                               onClick={() => {
@@ -729,17 +776,39 @@ function DetailContent() {
                             <td colSpan={5} className="px-4 py-4 border-b border-gray-700">
                                 <div className="overflow-x-auto">
                                     <h4 className="text-sm font-bold text-blue-400 mb-2">⚖️ マネーフォワード突合確認表</h4>
-                                    <table className="w-full text-xs text-center border-collapse min-w-[600px]">
-                                        <thead><tr className="bg-gray-900 text-gray-400"><th className="p-2 border border-gray-700 w-16">月</th><th className="p-2 border border-gray-700 text-green-300">オロチ売上</th><th className="p-2 border border-gray-700 text-green-300">オロチ仕入</th><th className="p-2 border border-gray-700 text-blue-300 bg-blue-900/20">MF売上 (参考)</th><th className="p-2 border border-gray-700 text-blue-300 bg-blue-900/20">MF仕入 (判定対象)</th><th className="p-2 border border-gray-700">売上差異</th><th className="p-2 border border-gray-700 font-bold border-l-2 border-l-gray-500">仕入判定 (10%未満)</th></tr></thead>
+                                    <table className="w-full text-xs text-center border-collapse min-w-[800px]">
+                                        <thead><tr className="bg-gray-900 text-gray-400">
+                                          <th className="p-2 border border-gray-700 w-16">月</th>
+                                          <th className="p-2 border border-gray-700 text-green-300">オロチ売上</th>
+                                          <th className="p-2 border border-gray-700 text-green-300">オロチ仕入</th>
+                                          
+                                          {/* その他（調整）カラムを追加 */}
+                                          <th className="p-2 border border-gray-700 text-yellow-300 bg-yellow-900/10">その他売上<br/><span className="text-[9px]">(オロチ外)</span></th>
+                                          <th className="p-2 border border-gray-700 text-yellow-300 bg-yellow-900/10">その他仕入<br/><span className="text-[9px]">(オロチ外)</span></th>
+
+                                          <th className="p-2 border border-gray-700 text-blue-300 bg-blue-900/20">MF売上 (参考)</th>
+                                          <th className="p-2 border border-gray-700 text-blue-300 bg-blue-900/20">MF仕入 (判定対象)</th>
+                                          <th className="p-2 border border-gray-700">売上差異</th>
+                                          <th className="p-2 border border-gray-700 font-bold border-l-2 border-l-gray-500">仕入判定 (10%未満)</th>
+                                        </tr></thead>
                                         <tbody>
                                             {currentMonths.map(month => {
                                                 const orochiTask = tasks.find(t => t.no === "6");
                                                 const orochiTotal = calculateMonthlyTotal(orochiTask?.details?.monthlyData, month);
+                                                
                                                 const mfData = task.details?.mfData?.[month] || { sales: 0, purchase: 0 };
-                                                const salesDiffVal = (orochiTotal.sales - orochiTotal.fee) - mfData.sales;
+                                                const adjData = task.details?.adjustmentData?.[month] || { salesAdj: 0, purchaseAdj: 0 };
+
+                                                // 売上差異： (オロチ売上 - 手数料 + その他売上) - MF売上
+                                                const compareSales = (orochiTotal.sales - orochiTotal.fee) + (adjData.salesAdj || 0);
+                                                const salesDiffVal = compareSales - mfData.sales;
                                                 const salesDiffRate = mfData.sales ? (Math.abs(salesDiffVal) / mfData.sales) * 100 : 0;
-                                                const purchaseDiffVal = Math.abs(orochiTotal.purchase - mfData.purchase);
+                                                
+                                                // 仕入差異： (オロチ仕入 + その他仕入) - MF仕入
+                                                const comparePurchase = orochiTotal.purchase + (adjData.purchaseAdj || 0);
+                                                const purchaseDiffVal = Math.abs(comparePurchase - mfData.purchase);
                                                 const purchaseDiffRate = mfData.purchase ? (purchaseDiffVal / mfData.purchase) * 100 : 0;
+                                                
                                                 const isPurchaseOk = purchaseDiffRate <= 10;
 
                                                 return (
@@ -747,8 +816,18 @@ function DetailContent() {
                                                         <td className="p-2 border border-gray-700 font-bold">{month}月</td>
                                                         <td className="p-2 border border-gray-700 text-right">{orochiTotal.sales.toLocaleString()}</td>
                                                         <td className="p-2 border border-gray-700 text-right">{orochiTotal.purchase.toLocaleString()}</td>
-                                                        <td className="p-2 border border-gray-700 bg-blue-900/10"><input type="number" value={mfData.sales || ''} onChange={(e) => handleMfDataChange(index, month, 'sales', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-blue-500" placeholder="MF売上" /></td>
-                                                        <td className="p-2 border border-gray-700 bg-blue-900/10"><input type="number" value={mfData.purchase || ''} onChange={(e) => handleMfDataChange(index, month, 'purchase', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-blue-500" placeholder="MF仕入" /></td>
+                                                        
+                                                        {/* その他売上入力 */}
+                                                        <td className="p-1 border border-gray-700 bg-yellow-900/10">
+                                                          <input type="number" value={adjData.salesAdj || ''} onChange={(e) => handleAdjustmentDataChange(index, month, 'salesAdj', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-yellow-500" placeholder="0" />
+                                                        </td>
+                                                        {/* その他仕入入力 */}
+                                                        <td className="p-1 border border-gray-700 bg-yellow-900/10">
+                                                          <input type="number" value={adjData.purchaseAdj || ''} onChange={(e) => handleAdjustmentDataChange(index, month, 'purchaseAdj', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-yellow-500" placeholder="0" />
+                                                        </td>
+
+                                                        <td className="p-1 border border-gray-700 bg-blue-900/10"><input type="number" value={mfData.sales || ''} onChange={(e) => handleMfDataChange(index, month, 'sales', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-blue-500" placeholder="MF売上" /></td>
+                                                        <td className="p-1 border border-gray-700 bg-blue-900/10"><input type="number" value={mfData.purchase || ''} onChange={(e) => handleMfDataChange(index, month, 'purchase', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-blue-500" placeholder="MF仕入" /></td>
                                                         <td className="p-2 border border-gray-700 text-right text-gray-400">{mfData.sales ? <span>{salesDiffRate.toFixed(1)}% <span className="text-[9px] block text-gray-500">(入金ズレ)</span></span> : '-'}</td>
                                                         <td className={`p-2 border-t border-b border-r border-gray-700 border-l-2 border-l-gray-500 text-center font-bold ${isPurchaseOk ? 'text-green-400' : 'text-red-400'}`}>{mfData.purchase > 0 ? (isPurchaseOk ? 'OK' : '要確認') : '-'}{mfData.purchase > 0 && <div className="text-[9px] font-normal opacity-70">差異:{purchaseDiffRate.toFixed(1)}%</div>}</td>
                                                     </tr>
