@@ -51,9 +51,8 @@ const INITIAL_TASKS = [
   { 
     no: "7", name: '売上仕入集計とMF損益計算書の比較確認（仕入差異チェック）', clientInput: '', officeStatus: '未',
     type: 'sales_check',
-    // ↓ adjustmentData（その他調整）を追加
-    details: { mfData: {}, adjustmentData: {} }, 
-    manual: `<div class="attention"><p><strong><i class="fas fa-balance-scale"></i> 判定基準とロジック</strong></p><ul><li><strong>仕入（Purchases）：</strong> <span style="color:red;">重要チェック項目</span>です。クレカ連携ズレは数日程度のため、<strong>誤差10%以内</strong>であることを確認します。</li><li><strong>売上・手数料（Sales）：</strong> 入金サイクル（約2週間）のズレにより、単月では一致しません。</li><li><strong>オロチ外の調整：</strong> 店舗売上や、オロチを経由しない仕入がある場合は「その他（オロチ外）」欄に入力して差異を調整してください。</li></ul></div>`
+    details: { mfData: {} },
+    manual: `<div class="attention"><p><strong><i class="fas fa-balance-scale"></i> 判定基準とロジック</strong></p><ul><li><strong>仕入（Purchases）：</strong> <span style="color:red;">重要チェック項目</span>です。クレカ連携ズレは数日程度のため、<strong>誤差10%以内</strong>であることを確認します。</li><li><strong>売上・手数料（Sales）：</strong> 入金サイクル（約2週間）のズレにより、単月では一致しません。</li></ul></div><div class="visual-aid-container" style="text-align:left;"><h4>手数料の差異について（理論値 vs 実数値）</h4><p>ECオロチの手数料（理論値）より、実際の入金から計算した手数料が<strong>安い（入金が多い）場合</strong>は、キャンペーン割引等の「有利差異」であるため、<strong>問題ありません。</strong></p><p>逆に、理論値よりも手数料が著しく高い（入金が少なすぎる）場合は、以下の原因を確認してください。</p><ul><li>返金・キャンセル処理の反映漏れ</li><li>その他、予期せぬペナルティや調整金の発生</li></ul></div>`
   },
   { 
     no: "8", name: 'MF未払金残高の過少・過大確認（マイナス残高等）', clientInput: '', officeStatus: '未',
@@ -87,7 +86,6 @@ const INITIAL_TASKS = [
     no: "12", name: '仕入時Amazonポイントの私用使用分の金額記入', clientInput: '', officeStatus: '未',
     manual: `<div class="attention"><p>事業で貯めたポイントを個人利用した場合、その額を入力してください。</p></div>`
   },
-  // No.13 特記事項 (テキストエリア)
   { 
     no: "13", name: 'その月特異事項（高額な購入、契約変更など）', clientInput: '', officeStatus: '未',
     type: 'textarea',
@@ -237,7 +235,7 @@ function DetailContent() {
   const [currentYear, setCurrentYear] = useState(() => {
     if (urlYear) return parseInt(urlYear);
     const today = new Date();
-    const currentMonth = today.getMonth() + 1; 
+    const currentMonth = today.getMonth() + 1; // 1-12
     const currentFullYear = today.getFullYear();
     if (currentMonth <= 3) return currentFullYear - 1;
     return currentFullYear;
@@ -262,6 +260,9 @@ function DetailContent() {
   const [openInputId, setOpenInputId] = useState<number | null>(null);
   
   const [clientStatus, setClientStatus] = useState<'未着手' | '進行中' | '完了'>('未着手');
+  
+  // 印刷用ステート
+  const [printTarget, setPrintTarget] = useState<'1' | '2' | '3' | 'yearly' | null>(null);
 
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -302,7 +303,15 @@ function DetailContent() {
     }
   }, [currentYear]);
 
-  // ★修正：読み込み時のundefined対策とマージ処理
+  // 印刷モードがオンになったら印刷ダイアログを呼ぶ
+  useEffect(() => {
+    if (printTarget) {
+      setTimeout(() => {
+        window.print();
+      }, 800); // レンダリング待ち
+    }
+  }, [printTarget]);
+
   const loadTasksForTerm = (data: any, term: number, year: number) => {
     const termKey = `year_${year}_term${term}_tasks`;
     const savedTasks = data[termKey];
@@ -320,31 +329,12 @@ function DetailContent() {
       const mergedTasks = baseTasks.map((initTask: any) => {
         const saved = savedTasks.find((t: any) => t.no === initTask.no);
         if (saved) {
-          // undefinedを防ぐためにデフォルト値を明示的に設定
-          const safeClientInput = saved.clientInput !== undefined ? saved.clientInput : '';
-          const safeOfficeStatus = saved.officeStatus !== undefined ? saved.officeStatus : '未';
-          const safeMemo = saved.memo !== undefined ? saved.memo : '';
-          
-          // 詳細データのマージ
-          let mergedDetails = saved.details || initTask.details;
-          
-          // Task 7の場合はadjustmentDataなどの構造を保証する
-          if (initTask.type === 'sales_check') {
-             mergedDetails = {
-                 ...initTask.details, // 初期構造
-                 ...(saved.details || {}) // 保存値を上書き
-             };
-             // adjustmentDataが保存データになければ初期化
-             if (!mergedDetails.adjustmentData) mergedDetails.adjustmentData = {};
-             if (!mergedDetails.mfData) mergedDetails.mfData = {};
-          }
-
           return { 
             ...initTask,
-            clientInput: safeClientInput,
-            officeStatus: safeOfficeStatus,
-            memo: safeMemo,
-            details: mergedDetails
+            clientInput: saved.clientInput,
+            officeStatus: saved.officeStatus,
+            memo: saved.memo,
+            details: saved.details || initTask.details 
           };
         }
         return initTask;
@@ -356,15 +346,18 @@ function DetailContent() {
     }
   };
 
-  // ★修正：保存時のサニタイズ処理（undefined除去）
   const saveDataToFirestore = async (currentTasks: any[], term: number, year: number, newClientStatus?: string) => {
     if (!clientId) return;
     setSaveStatus('saving');
     try {
       const docRef = doc(db, "clients", clientId);
-      const total = currentTasks.length;
-      const completed = currentTasks.filter((t: any) => t.officeStatus === 'OK').length;
-      const isStarted = currentTasks.some((t: any) => t.officeStatus === 'OK' || t.officeStatus === '要確認');
+      
+      // ★ 修正: Firestoreエラー対策。JSON変換を挟むことで、保存不可能な「undefined」を綺麗に取り除く
+      const cleanTasks = JSON.parse(JSON.stringify(currentTasks));
+
+      const total = cleanTasks.length;
+      const completed = cleanTasks.filter((t: any) => t.officeStatus === 'OK').length;
+      const isStarted = cleanTasks.some((t: any) => t.officeStatus === 'OK' || t.officeStatus === '要確認');
       
       let newOfficeStatus = '未チェック';
       if (completed === total) newOfficeStatus = '承認完了';
@@ -373,31 +366,35 @@ function DetailContent() {
       const termKey = `year_${year}_term${term}_tasks`;
       const officeStatusKey = `year_${year}.term${term}.officeStatus`;
       const clientStatusKey = `year_${year}.term${term}.clientStatus`;
+      const completedAtKey = `year_${year}.term${term}.completedAt`;
 
       const statusToSave = newClientStatus || clientStatus;
 
-      // ★重要：undefinedが含まれているとFirebaseがエラーを吐くため、
-      // JSON.stringify -> JSON.parse を通すことで undefined をキーごと削除する
-      const cleanTasks = JSON.parse(JSON.stringify(currentTasks));
-
-      await updateDoc(docRef, {
-        [termKey]: cleanTasks,
+      const updates: any = {
+        [termKey]: cleanTasks, // ★修正: クリーニング済みのタスクデータを渡す
         [officeStatusKey]: newOfficeStatus,
         [clientStatusKey]: statusToSave
-      });
+      };
+
+      if (statusToSave === '完了') {
+        updates[completedAtKey] = new Date().toISOString();
+      }
+
+      await updateDoc(docRef, updates);
 
       setFullData((prev: any) => {
         const newYearData = prev[`year_${year}`] || {};
         const newTermData = newYearData[`term${term}`] || {};
         return {
           ...prev,
-          [termKey]: currentTasks,
+          [termKey]: cleanTasks,
           [`year_${year}`]: {
             ...newYearData,
             [`term${term}`]: { 
                 ...newTermData, 
                 officeStatus: newOfficeStatus,
-                clientStatus: statusToSave 
+                clientStatus: statusToSave,
+                completedAt: statusToSave === '完了' ? new Date().toISOString() : newTermData.completedAt
             }
           }
         };
@@ -455,71 +452,42 @@ function DetailContent() {
     triggerAutoSave(newTasks, newStatus);
   };
 
+  // ★ 修正: 直接変更せず、ディープコピーをしてから書き換える（確実な保存のため）
   const handleOrochiDataChange = (taskIndex: number, month: number, shop: string, field: string, value: string) => {
     setSaveStatus('changed');
-    const newTasks = tasks.map((task, i) => {
-      if (i !== taskIndex) return task;
-      const newDetails = { 
-        ...task.details,
-        monthlyData: { ...task.details?.monthlyData } 
-      };
-      if(!newDetails.monthlyData[month]) newDetails.monthlyData[month] = {};
-      if(!newDetails.monthlyData[month][shop]) newDetails.monthlyData[month][shop] = {};
-
-      newDetails.monthlyData[month][shop] = { 
-        ...newDetails.monthlyData[month][shop],
-        [field]: value === '' ? 0 : parseFloat(value)
-      };
-      return {
-        ...task,
-        clientInput: "詳細データ入力済",
-        details: newDetails
-      };
-    });
+    const newTasks = [...tasks];
+    const task = JSON.parse(JSON.stringify(newTasks[taskIndex])); // ディープコピー
+    
+    if (!task.details) task.details = { monthlyData: {} };
+    if (!task.details.monthlyData) task.details.monthlyData = {};
+    if (!task.details.monthlyData[month]) task.details.monthlyData[month] = {};
+    if (!task.details.monthlyData[month][shop]) task.details.monthlyData[month][shop] = {};
+    
+    task.details.monthlyData[month][shop][field] = value === '' ? 0 : parseFloat(value);
+    task.clientInput = "詳細データ入力済";
+    
+    newTasks[taskIndex] = task;
     setTasks(newTasks);
+    
     const newStatus = updateStatusToInProgress();
     triggerAutoSave(newTasks, newStatus);
   };
 
+  // ★ 修正: ディープコピーで確実に変更を検知させる
   const handleMfDataChange = (taskIndex: number, month: number, field: string, value: string) => {
     setSaveStatus('changed');
-    const newTasks = tasks.map((task, i) => {
-      if (i !== taskIndex) return task;
-      const newDetails = {
-        ...task.details,
-        mfData: { ...task.details?.mfData }
-      };
-      if(!newDetails.mfData[month]) newDetails.mfData[month] = {};
-
-      newDetails.mfData[month] = {
-        ...newDetails.mfData[month],
-        [field]: value === '' ? 0 : parseFloat(value)
-      };
-      return { ...task, details: newDetails };
-    });
+    const newTasks = [...tasks];
+    const task = JSON.parse(JSON.stringify(newTasks[taskIndex])); // ディープコピー
+    
+    if (!task.details) task.details = { mfData: {} };
+    if (!task.details.mfData) task.details.mfData = {};
+    if (!task.details.mfData[month]) task.details.mfData[month] = {};
+    
+    task.details.mfData[month][field] = value === '' ? 0 : parseFloat(value);
+    
+    newTasks[taskIndex] = task;
     setTasks(newTasks);
-    const newStatus = updateStatusToInProgress();
-    triggerAutoSave(newTasks, newStatus);
-  };
-
-  // ★追加：その他調整データの入力ハンドラ
-  const handleAdjustmentDataChange = (taskIndex: number, month: number, field: string, value: string) => {
-    setSaveStatus('changed');
-    const newTasks = tasks.map((task, i) => {
-      if (i !== taskIndex) return task;
-      const newDetails = {
-        ...task.details,
-        adjustmentData: { ...task.details?.adjustmentData }
-      };
-      if(!newDetails.adjustmentData[month]) newDetails.adjustmentData[month] = {};
-
-      newDetails.adjustmentData[month] = {
-        ...newDetails.adjustmentData[month],
-        [field]: value === '' ? 0 : parseFloat(value)
-      };
-      return { ...task, details: newDetails };
-    });
-    setTasks(newTasks);
+    
     const newStatus = updateStatusToInProgress();
     triggerAutoSave(newTasks, newStatus);
   };
@@ -563,14 +531,244 @@ function DetailContent() {
     return { sales, purchase, fee };
   };
 
+  // 年間合計計算用
+  const calculateYearlyTotal = () => {
+    let yearlyOrochiSales = 0;
+    let yearlyOrochiPurchase = 0;
+    let yearlyOrochiFee = 0;
+    let yearlyMfSales = 0;
+    let yearlyMfPurchase = 0;
+
+    [1, 2, 3].forEach(term => {
+      let termTasks: any[] = [];
+      if (term === activeTerm) {
+        termTasks = tasks;
+      } else if (fullData) {
+        const termKey = `year_${currentYear}_term${term}_tasks`;
+        termTasks = fullData[termKey] || [];
+      }
+
+      const orochiTask = termTasks.find((t: any) => t.no === "6");
+      if (orochiTask?.details?.monthlyData) {
+        Object.values(orochiTask.details.monthlyData).forEach((shops: any) => {
+          Object.values(shops).forEach((s: any) => {
+            yearlyOrochiSales += s.sales || 0;
+            yearlyOrochiPurchase += s.purchase || 0;
+            yearlyOrochiFee += s.fee || 0;
+          });
+        });
+      }
+
+      const mfTask = termTasks.find((t: any) => t.no === "7");
+      if (mfTask?.details?.mfData) {
+        Object.values(mfTask.details.mfData).forEach((m: any) => {
+          yearlyMfSales += m.sales || 0;
+          yearlyMfPurchase += m.purchase || 0;
+        });
+      }
+    });
+
+    return { yearlyOrochiSales, yearlyOrochiPurchase, yearlyOrochiFee, yearlyMfSales, yearlyMfPurchase };
+  };
+
   if (loading) return <div className="p-8 text-white">データを読み込んでいます...</div>;
   if (!clientId) return <div className="p-8 text-white">URLが無効です</div>;
+
+  // ▼▼▼ 印刷プレビュー用レイアウト ▼▼▼
+  if (printTarget) {
+      const termsToPrint = printTarget === 'yearly' ? [1, 2, 3] : [parseInt(printTarget)];
+      const yearly = calculateYearlyTotal();
+  
+      return (
+        <div className="bg-white text-black min-h-screen font-sans pb-20">
+          {/* コントロールバー（印刷時は非表示） */}
+          <div className="print:hidden bg-gray-800 text-white p-4 flex justify-between items-center sticky top-0 z-50 shadow-lg">
+             <div className="flex items-center gap-4">
+               <button onClick={() => setPrintTarget(null)} className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded text-sm transition-colors font-bold">← 編集画面に戻る</button>
+               <span className="text-sm text-gray-300">印刷プレビューモード</span>
+             </div>
+             <button onClick={() => window.print()} className="px-6 py-2 bg-blue-600 hover:bg-blue-500 font-bold rounded shadow-lg flex items-center gap-2 text-white">
+               <i className="fas fa-print"></i> 印刷ダイアログを開く
+             </button>
+          </div>
+  
+          {/* 印刷本体 */}
+          <div className="p-8 max-w-[1000px] mx-auto print:p-0">
+              <div className="text-right text-sm text-gray-500 mb-2">印刷日: {new Date().toLocaleDateString('ja-JP')}</div>
+              <div className="border-b-2 border-black pb-4 mb-8 flex justify-between items-end">
+                  <div>
+                      <div className="text-sm mb-1">税理士小原司事務所</div>
+                      <h1 className="text-3xl font-bold">{clientName} 様</h1>
+                  </div>
+                  <div className="text-right">
+                      <h2 className="text-xl font-bold border border-black px-4 py-1.5 inline-block bg-gray-100">
+                          {currentYear}年度 作業報告書 ({printTarget === 'yearly' ? '年間合計' : `第${printTarget}期`})
+                      </h2>
+                  </div>
+              </div>
+  
+              {termsToPrint.map(term => {
+                  const termTasks = term === activeTerm ? tasks : (fullData?.[`year_${currentYear}_term${term}_tasks`] || []);
+                  const termMonths = TERM_MONTHS[term as keyof typeof TERM_MONTHS];
+  
+                  let termOrochiSales = 0;
+                  let termOrochiPurchase = 0;
+                  let termOrochiFee = 0;
+                  let termMfSales = 0;
+                  let termMfPurchase = 0;
+  
+                  const orochiTask = termTasks.find((t: any) => t.no === "6");
+                  const mfTask = termTasks.find((t: any) => t.no === "7");
+  
+                  termMonths.forEach(month => {
+                      const orochiTotal = calculateMonthlyTotal(orochiTask?.details?.monthlyData, month);
+                      const mfData = mfTask?.details?.mfData?.[month] || { sales: 0, purchase: 0 };
+                      termOrochiSales += orochiTotal.sales;
+                      termOrochiPurchase += orochiTotal.purchase;
+                      termOrochiFee += orochiTotal.fee;
+                      termMfSales += mfData.sales;
+                      termMfPurchase += mfData.purchase;
+                  });
+  
+                  return (
+                      <div key={term} className="mb-12" style={{ pageBreakInside: 'avoid' }}>
+                          <h3 className="text-lg font-bold bg-gray-200 px-3 py-2 border-l-4 border-gray-700 mb-4">
+                              第{term}期 ({termMonths[0]}月〜{termMonths[termMonths.length-1]}月)
+                          </h3>
+  
+                          {/* タスクリスト */}
+                          <table className="w-full text-xs border-collapse mb-8 border border-gray-400">
+                              <thead>
+                                  <tr className="bg-gray-100 border-b-2 border-gray-400">
+                                      <th className="border border-gray-400 p-2 w-10">No</th>
+                                      <th className="border border-gray-400 p-2 text-left">確認項目</th>
+                                      <th className="border border-gray-400 p-2 w-48">お客様入力</th>
+                                      <th className="border border-gray-400 p-2 w-20">事務所判定</th>
+                                      <th className="border border-gray-400 p-2 w-48 text-left">管理者メモ</th>
+                                  </tr>
+                              </thead>
+                              <tbody>
+                                  {termTasks.map((t: any, i: number) => (
+                                      <tr key={i}>
+                                          <td className="border border-gray-400 p-2 text-center">{t.no}</td>
+                                          <td className="border border-gray-400 p-2">{t.name}</td>
+                                          <td className="border border-gray-400 p-2 text-gray-800">{t.clientInput}</td>
+                                          <td className="border border-gray-400 p-2 text-center font-bold">{t.officeStatus}</td>
+                                          <td className="border border-gray-400 p-2">{t.memo}</td>
+                                      </tr>
+                                  ))}
+                              </tbody>
+                          </table>
+  
+                          {/* 簡易売上・突合表 (期計のみ) */}
+                          <div className="flex gap-4 items-start" style={{ pageBreakInside: 'avoid' }}>
+                              <div className="flex-1">
+                                  <h4 className="font-bold text-sm mb-2">■ ECオロチ集計 (期計)</h4>
+                                  <table className="w-full text-xs text-center border-collapse border border-gray-400">
+                                      <thead>
+                                          <tr className="bg-gray-100">
+                                              <th className="border border-gray-400 p-1.5">売上合計</th>
+                                              <th className="border border-gray-400 p-1.5">仕入合計</th>
+                                              <th className="border border-gray-400 p-1.5">手数料合計</th>
+                                          </tr>
+                                      </thead>
+                                      <tbody>
+                                          <tr>
+                                              <td className="border border-gray-400 p-2 text-base">{termOrochiSales.toLocaleString()}</td>
+                                              <td className="border border-gray-400 p-2 text-base">{termOrochiPurchase.toLocaleString()}</td>
+                                              <td className="border border-gray-400 p-2 text-base text-red-600">△ {termOrochiFee.toLocaleString()}</td>
+                                          </tr>
+                                      </tbody>
+                                  </table>
+                              </div>
+                              <div className="flex-1">
+                                  <h4 className="font-bold text-sm mb-2">■ マネーフォワード突合 (期計)</h4>
+                                  <table className="w-full text-xs text-center border-collapse border border-gray-400">
+                                      <thead>
+                                          <tr className="bg-gray-100">
+                                              <th className="border border-gray-400 p-1.5">MF売上</th>
+                                              <th className="border border-gray-400 p-1.5">MF仕入</th>
+                                              <th className="border border-gray-400 p-1.5">仕入差異</th>
+                                          </tr>
+                                      </thead>
+                                      <tbody>
+                                          <tr>
+                                              <td className="border border-gray-400 p-2 text-base">{termMfSales.toLocaleString()}</td>
+                                              <td className="border border-gray-400 p-2 text-base">{termMfPurchase.toLocaleString()}</td>
+                                              <td className="border border-gray-400 p-2 text-base">
+                                                  {termMfPurchase ? ((Math.abs(termOrochiPurchase - termMfPurchase) / termMfPurchase) * 100).toFixed(1) + '%' : '-'}
+                                              </td>
+                                          </tr>
+                                      </tbody>
+                                  </table>
+                              </div>
+                          </div>
+                      </div>
+                  )
+              })}
+  
+              {printTarget === 'yearly' && (
+                  <div className="mt-8 pt-8 border-t-2 border-black" style={{ pageBreakInside: 'avoid' }}>
+                      <h3 className="text-xl font-bold bg-black text-white px-4 py-2 mb-6 inline-block">
+                          {currentYear}年度 年間合計表
+                      </h3>
+                      <div className="flex gap-8">
+                          <table className="w-1/2 text-sm border-collapse border border-gray-400">
+                              <tbody>
+                                  <tr>
+                                      <th className="border border-gray-400 p-3 bg-gray-100 text-left w-1/2">オロチ売上 (年間)</th>
+                                      <td className="border border-gray-400 p-3 text-right font-bold text-lg">{yearly.yearlyOrochiSales.toLocaleString()} 円</td>
+                                  </tr>
+                                  {/* ★ 修正: 販売手数料の行を追加 */}
+                                  <tr>
+                                      <th className="border border-gray-400 p-3 bg-gray-100 text-left w-1/2">オロチ販売手数料 (年間)</th>
+                                      <td className="border border-gray-400 p-3 text-right font-bold text-lg text-red-600">△ {yearly.yearlyOrochiFee.toLocaleString()} 円</td>
+                                  </tr>
+                                  <tr>
+                                      <th className="border border-gray-400 p-3 bg-gray-100 text-left">MF売上 (年間)</th>
+                                      <td className="border border-gray-400 p-3 text-right font-bold text-lg">{yearly.yearlyMfSales.toLocaleString()} 円</td>
+                                  </tr>
+                                  <tr>
+                                      <th className="border border-gray-400 p-3 bg-gray-100 text-left">売上差異</th>
+                                      <td className="border border-gray-400 p-3 text-right">
+                                          {yearly.yearlyMfSales ? ((Math.abs((yearly.yearlyOrochiSales - yearly.yearlyOrochiFee) - yearly.yearlyMfSales) / yearly.yearlyMfSales) * 100).toFixed(1) + '%' : '-'}
+                                      </td>
+                                  </tr>
+                              </tbody>
+                          </table>
+                          <table className="w-1/2 text-sm border-collapse border border-gray-400">
+                              <tbody>
+                                  <tr>
+                                      <th className="border border-gray-400 p-3 bg-gray-100 text-left w-1/2">オロチ仕入 (年間)</th>
+                                      <td className="border border-gray-400 p-3 text-right font-bold text-lg">{yearly.yearlyOrochiPurchase.toLocaleString()} 円</td>
+                                  </tr>
+                                  <tr>
+                                      <th className="border border-gray-400 p-3 bg-gray-100 text-left">MF仕入 (年間)</th>
+                                      <td className="border border-gray-400 p-3 text-right font-bold text-lg">{yearly.yearlyMfPurchase.toLocaleString()} 円</td>
+                                  </tr>
+                                  <tr>
+                                      <th className="border border-gray-400 p-3 bg-gray-100 text-left">仕入差異</th>
+                                      <td className="border border-gray-400 p-3 text-right">
+                                          {yearly.yearlyMfPurchase ? ((Math.abs(yearly.yearlyOrochiPurchase - yearly.yearlyMfPurchase) / yearly.yearlyMfPurchase) * 100).toFixed(1) + '%' : '-'}
+                                      </td>
+                                  </tr>
+                              </tbody>
+                          </table>
+                      </div>
+                  </div>
+              )}
+          </div>
+        </div>
+      );
+  }
+  // ▲▲▲ ここまで印刷プレビュー用 ▲▲▲
 
   const currentMonths = TERM_MONTHS[activeTerm as keyof typeof TERM_MONTHS];
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4 flex flex-col">
       <div className="flex-grow">
+          {/* ヘッダー */}
           <div className="mb-6 flex items-center justify-between border-b border-gray-800 pb-4">
             <div className="flex items-center gap-6">
               {isAdmin && (
@@ -579,6 +777,7 @@ function DetailContent() {
               <div>
                 <div className="text-[10px] text-gray-400 mb-0.5">税理士小原司事務所</div>
                 <h1 className="text-2xl font-bold flex items-center gap-2 mb-2">{clientName}</h1>
+                
                 <div className="flex items-center gap-2 bg-yellow-500/10 p-2 rounded border-2 border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)]">
                   <span className="text-xs text-yellow-300 font-bold px-1 uppercase tracking-wider">対象年度</span>
                   <select 
@@ -596,6 +795,32 @@ function DetailContent() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+              {/* ★ 修正: マウスが離れないように透明な橋渡し（pt-2）を追加 */}
+              <div className="relative group mr-2">
+                <button className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded flex items-center gap-2 text-sm border border-gray-600 transition-colors shadow">
+                  <i className="fas fa-print"></i> 印刷・PDF出力
+                </button>
+                <div className="absolute right-0 pt-2 w-48 hidden group-hover:block z-50">
+                  <div className="bg-white text-gray-800 rounded shadow-xl border border-gray-200 overflow-hidden">
+                    <button onClick={() => setPrintTarget('1')} className="block w-full text-left px-4 py-2.5 hover:bg-blue-50 text-sm border-b border-gray-100">第1期を印刷</button>
+                    <button onClick={() => setPrintTarget('2')} className="block w-full text-left px-4 py-2.5 hover:bg-blue-50 text-sm border-b border-gray-100">第2期を印刷</button>
+                    <button onClick={() => setPrintTarget('3')} className="block w-full text-left px-4 py-2.5 hover:bg-blue-50 text-sm border-b border-gray-100">第3期を印刷</button>
+                    <button onClick={() => setPrintTarget('yearly')} className="block w-full text-left px-4 py-3 hover:bg-blue-50 text-sm font-bold text-blue-600 bg-blue-50/30">年間合計として印刷</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* ★ 新設: 強制的な手動保存ボタン */}
+              <button 
+                onClick={() => {
+                  if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+                  saveDataToFirestore(tasks, activeTerm, currentYear);
+                }}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded flex items-center gap-2 text-sm transition-colors shadow mr-2 font-bold"
+              >
+                <i className="fas fa-save"></i> データを保存
+              </button>
+
               <div className="flex flex-col items-end">
                   <span className="text-[10px] text-gray-400 mb-1">現在のステータス</span>
                   <span className={`text-xs px-2 py-1 rounded font-bold border ${
@@ -606,10 +831,10 @@ function DetailContent() {
                       {clientStatus}
                   </span>
               </div>
+              
               {saveStatus === 'saved' && <span className="text-sm text-gray-500 flex items-center gap-1 ml-2"><span className="w-2 h-2 bg-green-500 rounded-full"></span> 保存済</span>}
               {saveStatus === 'saving' && <span className="text-sm text-blue-400 flex items-center gap-1 ml-2 animate-pulse"><span className="w-2 h-2 bg-blue-400 rounded-full"></span> 保存中</span>}
               {saveStatus === 'changed' && <span className="text-sm text-yellow-500 flex items-center gap-1 ml-2"><span className="w-2 h-2 bg-yellow-500 rounded-full"></span> 待機中</span>}
-              {saveStatus === 'error' && <span className="text-sm text-red-500 flex items-center gap-1 ml-2"><span className="w-2 h-2 bg-red-500 rounded-full"></span> エラー</span>}
             </div>
           </div>
 
@@ -721,7 +946,7 @@ function DetailContent() {
                                   ? 'bg-gray-900 border-gray-700 text-gray-400 cursor-pointer hover:bg-gray-800' 
                                   : task.clientInput 
                                     ? 'bg-white border-gray-300 text-gray-900' 
-                                    : 'bg-white border-yellow-500/70 text-gray-900 placeholder-gray-400 ring-2 ring-yellow-500/20' 
+                                    : 'bg-white border-yellow-500/70 text-gray-900 placeholder-gray-400 ring-2 ring-yellow-500/20'
                                 }`} 
                               placeholder={(task.type === 'sales_input' || task.type === 'sales_check') ? "ボタンから入力" : ""}
                               onClick={() => {
@@ -742,7 +967,6 @@ function DetailContent() {
                       </td>
                     </tr>
 
-                    {/* Input Form & Manual rendering */}
                     {openInputId === index && task.type === 'sales_input' && (
                         <tr className="bg-gray-800/80">
                             <td colSpan={5} className="px-4 py-4 border-b border-gray-700">
@@ -751,19 +975,42 @@ function DetailContent() {
                                     <table className="w-full text-xs text-center border-collapse min-w-[600px]">
                                         <thead><tr className="bg-gray-900 text-gray-400"><th className="p-2 border border-gray-700 w-16">月</th><th className="p-2 border border-gray-700">店舗</th><th className="p-2 border border-gray-700 bg-yellow-900/10 text-yellow-200">売上合計</th><th className="p-2 border border-gray-700 bg-yellow-900/10 text-yellow-200">仕入合計</th><th className="p-2 border border-gray-700 bg-yellow-900/10 text-yellow-200">手数料合計</th></tr></thead>
                                         <tbody>
-                                            {currentMonths.map(month => (
-                                                <React.Fragment key={month}>
-                                                    {SHOPS.map((shop, shopIndex) => (
-                                                        <tr key={`${month}-${shop}`} className="hover:bg-gray-700">
-                                                            {shopIndex === 0 && <td rowSpan={SHOPS.length} className="p-2 border border-gray-700 font-bold bg-gray-800">{month}月</td>}
-                                                            <td className="p-2 border border-gray-700">{shop}</td>
-                                                            <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop]?.sales || ''} onChange={(e) => handleOrochiDataChange(index, month, shop, 'sales', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
-                                                            <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop]?.purchase || ''} onChange={(e) => handleOrochiDataChange(index, month, shop, 'purchase', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
-                                                            <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop]?.fee || ''} onChange={(e) => handleOrochiDataChange(index, month, shop, 'fee', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
-                                                        </tr>
-                                                    ))}
-                                                </React.Fragment>
-                                            ))}
+                                            {(() => {
+                                                let termSales = 0;
+                                                let termPurchase = 0;
+                                                let termFee = 0;
+
+                                                const rows = currentMonths.map(month => (
+                                                    <React.Fragment key={month}>
+                                                        {SHOPS.map((shop, shopIndex) => {
+                                                            const sData = task.details?.monthlyData?.[month]?.[shop] || {};
+                                                            termSales += sData.sales || 0;
+                                                            termPurchase += sData.purchase || 0;
+                                                            termFee += sData.fee || 0;
+
+                                                            return (
+                                                                <tr key={`${month}-${shop}`} className="hover:bg-gray-700">
+                                                                    {shopIndex === 0 && <td rowSpan={SHOPS.length} className="p-2 border border-gray-700 font-bold bg-gray-800">{month}月</td>}
+                                                                    <td className="p-2 border border-gray-700">{shop}</td>
+                                                                    <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop]?.sales || ''} onChange={(e) => handleOrochiDataChange(index, month, shop, 'sales', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
+                                                                    <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop]?.purchase || ''} onChange={(e) => handleOrochiDataChange(index, month, shop, 'purchase', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
+                                                                    <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop]?.fee || ''} onChange={(e) => handleOrochiDataChange(index, month, shop, 'fee', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </React.Fragment>
+                                                ));
+
+                                                rows.push(
+                                                    <tr key="term-total" className="bg-gray-900/80 font-bold border-t-2 border-gray-500">
+                                                        <td colSpan={2} className="p-2 border border-gray-700 text-yellow-400 text-right">期計</td>
+                                                        <td className="p-2 border border-gray-700 text-right text-yellow-400">{termSales.toLocaleString()}</td>
+                                                        <td className="p-2 border border-gray-700 text-right text-yellow-400">{termPurchase.toLocaleString()}</td>
+                                                        <td className="p-2 border border-gray-700 text-right text-yellow-400">{termFee.toLocaleString()}</td>
+                                                    </tr>
+                                                );
+                                                return rows;
+                                            })()}
                                         </tbody>
                                     </table>
                                 </div>
@@ -776,65 +1023,118 @@ function DetailContent() {
                             <td colSpan={5} className="px-4 py-4 border-b border-gray-700">
                                 <div className="overflow-x-auto">
                                     <h4 className="text-sm font-bold text-blue-400 mb-2">⚖️ マネーフォワード突合確認表</h4>
-                                    <table className="w-full text-xs text-center border-collapse min-w-[800px]">
-                                        <thead><tr className="bg-gray-900 text-gray-400">
-                                          <th className="p-2 border border-gray-700 w-16">月</th>
-                                          <th className="p-2 border border-gray-700 text-green-300">オロチ売上</th>
-                                          <th className="p-2 border border-gray-700 text-green-300">オロチ仕入</th>
-                                          
-                                          {/* その他（調整）カラムを追加 */}
-                                          <th className="p-2 border border-gray-700 text-yellow-300 bg-yellow-900/10">その他売上<br/><span className="text-[9px]">(オロチ外)</span></th>
-                                          <th className="p-2 border border-gray-700 text-yellow-300 bg-yellow-900/10">その他仕入<br/><span className="text-[9px]">(オロチ外)</span></th>
-
-                                          <th className="p-2 border border-gray-700 text-blue-300 bg-blue-900/20">MF売上 (参考)</th>
-                                          <th className="p-2 border border-gray-700 text-blue-300 bg-blue-900/20">MF仕入 (判定対象)</th>
-                                          <th className="p-2 border border-gray-700">売上差異</th>
-                                          <th className="p-2 border border-gray-700 font-bold border-l-2 border-l-gray-500">仕入判定 (10%未満)</th>
-                                        </tr></thead>
+                                    <table className="w-full text-xs text-center border-collapse min-w-[600px] mb-4">
+                                        <thead><tr className="bg-gray-900 text-gray-400"><th className="p-2 border border-gray-700 w-16">月</th><th className="p-2 border border-gray-700 text-green-300">オロチ売上</th><th className="p-2 border border-gray-700 text-green-300">オロチ仕入</th><th className="p-2 border border-gray-700 text-blue-300 bg-blue-900/20">MF売上 (参考)</th><th className="p-2 border border-gray-700 text-blue-300 bg-blue-900/20">MF仕入 (判定対象)</th><th className="p-2 border border-gray-700">売上差異</th><th className="p-2 border border-gray-700 font-bold border-l-2 border-l-gray-500">仕入判定 (10%未満)</th></tr></thead>
                                         <tbody>
-                                            {currentMonths.map(month => {
-                                                const orochiTask = tasks.find(t => t.no === "6");
-                                                const orochiTotal = calculateMonthlyTotal(orochiTask?.details?.monthlyData, month);
-                                                
-                                                const mfData = task.details?.mfData?.[month] || { sales: 0, purchase: 0 };
-                                                const adjData = task.details?.adjustmentData?.[month] || { salesAdj: 0, purchaseAdj: 0 };
+                                            {(() => {
+                                                let termOrochiSales = 0;
+                                                let termOrochiPurchase = 0;
+                                                let termOrochiFee = 0;
+                                                let termMfSales = 0;
+                                                let termMfPurchase = 0;
 
-                                                // 売上差異： (オロチ売上 - 手数料 + その他売上) - MF売上
-                                                const compareSales = (orochiTotal.sales - orochiTotal.fee) + (adjData.salesAdj || 0);
-                                                const salesDiffVal = compareSales - mfData.sales;
-                                                const salesDiffRate = mfData.sales ? (Math.abs(salesDiffVal) / mfData.sales) * 100 : 0;
-                                                
-                                                // 仕入差異： (オロチ仕入 + その他仕入) - MF仕入
-                                                const comparePurchase = orochiTotal.purchase + (adjData.purchaseAdj || 0);
-                                                const purchaseDiffVal = Math.abs(comparePurchase - mfData.purchase);
-                                                const purchaseDiffRate = mfData.purchase ? (purchaseDiffVal / mfData.purchase) * 100 : 0;
-                                                
-                                                const isPurchaseOk = purchaseDiffRate <= 10;
+                                                const rows = currentMonths.map(month => {
+                                                    const orochiTask = tasks.find(t => t.no === "6");
+                                                    const orochiTotal = calculateMonthlyTotal(orochiTask?.details?.monthlyData, month);
+                                                    const mfData = task.details?.mfData?.[month] || { sales: 0, purchase: 0 };
+                                                    
+                                                    termOrochiSales += orochiTotal.sales;
+                                                    termOrochiPurchase += orochiTotal.purchase;
+                                                    termOrochiFee += orochiTotal.fee;
+                                                    termMfSales += mfData.sales;
+                                                    termMfPurchase += mfData.purchase;
 
-                                                return (
-                                                    <tr key={month} className="hover:bg-gray-700">
-                                                        <td className="p-2 border border-gray-700 font-bold">{month}月</td>
-                                                        <td className="p-2 border border-gray-700 text-right">{orochiTotal.sales.toLocaleString()}</td>
-                                                        <td className="p-2 border border-gray-700 text-right">{orochiTotal.purchase.toLocaleString()}</td>
-                                                        
-                                                        {/* その他売上入力 */}
-                                                        <td className="p-1 border border-gray-700 bg-yellow-900/10">
-                                                          <input type="number" value={adjData.salesAdj || ''} onChange={(e) => handleAdjustmentDataChange(index, month, 'salesAdj', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-yellow-500" placeholder="0" />
+                                                    const salesDiffVal = (orochiTotal.sales - orochiTotal.fee) - mfData.sales;
+                                                    const salesDiffRate = mfData.sales ? (Math.abs(salesDiffVal) / mfData.sales) * 100 : 0;
+                                                    const purchaseDiffVal = Math.abs(orochiTotal.purchase - mfData.purchase);
+                                                    const purchaseDiffRate = mfData.purchase ? (purchaseDiffVal / mfData.purchase) * 100 : 0;
+                                                    const isPurchaseOk = purchaseDiffRate <= 10;
+
+                                                    return (
+                                                        <tr key={month} className="hover:bg-gray-700">
+                                                            <td className="p-2 border border-gray-700 font-bold">{month}月</td>
+                                                            <td className="p-2 border border-gray-700 text-right">{orochiTotal.sales.toLocaleString()}</td>
+                                                            <td className="p-2 border border-gray-700 text-right">{orochiTotal.purchase.toLocaleString()}</td>
+                                                            <td className="p-2 border border-gray-700 bg-blue-900/10"><input type="number" value={mfData.sales || ''} onChange={(e) => handleMfDataChange(index, month, 'sales', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-blue-500" placeholder="MF売上" /></td>
+                                                            <td className="p-2 border border-gray-700 bg-blue-900/10"><input type="number" value={mfData.purchase || ''} onChange={(e) => handleMfDataChange(index, month, 'purchase', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-blue-500" placeholder="MF仕入" /></td>
+                                                            <td className="p-2 border border-gray-700 text-right text-gray-400">{mfData.sales ? <span>{salesDiffRate.toFixed(1)}% <span className="text-[9px] block text-gray-500">(入金ズレ)</span></span> : '-'}</td>
+                                                            <td className={`p-2 border-t border-b border-r border-gray-700 border-l-2 border-l-gray-500 text-center font-bold ${isPurchaseOk ? 'text-green-400' : 'text-red-400'}`}>{mfData.purchase > 0 ? (isPurchaseOk ? 'OK' : '要確認') : '-'}{mfData.purchase > 0 && <div className="text-[9px] font-normal opacity-70">差異:{purchaseDiffRate.toFixed(1)}%</div>}</td>
+                                                        </tr>
+                                                    );
+                                                });
+
+                                                const termSalesDiffVal = (termOrochiSales - termOrochiFee) - termMfSales;
+                                                const termSalesDiffRate = termMfSales ? (Math.abs(termSalesDiffVal) / termMfSales) * 100 : 0;
+                                                const termPurchaseDiffVal = Math.abs(termOrochiPurchase - termMfPurchase);
+                                                const termPurchaseDiffRate = termMfPurchase ? (termPurchaseDiffVal / termMfPurchase) * 100 : 0;
+                                                const isTermPurchaseOk = termPurchaseDiffRate <= 10;
+
+                                                rows.push(
+                                                    <tr key="term-total" className="bg-gray-900/80 font-bold border-t-2 border-gray-500">
+                                                        <td className="p-2 border border-gray-700 text-yellow-400">期計</td>
+                                                        <td className="p-2 border border-gray-700 text-right text-yellow-400">{termOrochiSales.toLocaleString()}</td>
+                                                        <td className="p-2 border border-gray-700 text-right text-yellow-400">{termOrochiPurchase.toLocaleString()}</td>
+                                                        <td className="p-2 border border-gray-700 text-right text-blue-300">{termMfSales.toLocaleString()}</td>
+                                                        <td className="p-2 border border-gray-700 text-right text-blue-300">{termMfPurchase.toLocaleString()}</td>
+                                                        <td className="p-2 border border-gray-700 text-right text-gray-400">{termMfSales ? <span>{termSalesDiffRate.toFixed(1)}%</span> : '-'}</td>
+                                                        <td className={`p-2 border-t border-b border-r border-gray-700 border-l-2 border-l-gray-500 text-center font-bold ${isTermPurchaseOk ? 'text-green-400' : 'text-red-400'}`}>
+                                                            {termMfPurchase > 0 ? (isTermPurchaseOk ? 'OK' : '要確認') : '-'}
+                                                            {termMfPurchase > 0 && <div className="text-[9px] font-normal opacity-70">差異:{termPurchaseDiffRate.toFixed(1)}%</div>}
                                                         </td>
-                                                        {/* その他仕入入力 */}
-                                                        <td className="p-1 border border-gray-700 bg-yellow-900/10">
-                                                          <input type="number" value={adjData.purchaseAdj || ''} onChange={(e) => handleAdjustmentDataChange(index, month, 'purchaseAdj', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-yellow-500" placeholder="0" />
-                                                        </td>
-
-                                                        <td className="p-1 border border-gray-700 bg-blue-900/10"><input type="number" value={mfData.sales || ''} onChange={(e) => handleMfDataChange(index, month, 'sales', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-blue-500" placeholder="MF売上" /></td>
-                                                        <td className="p-1 border border-gray-700 bg-blue-900/10"><input type="number" value={mfData.purchase || ''} onChange={(e) => handleMfDataChange(index, month, 'purchase', e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-right focus:border-blue-500" placeholder="MF仕入" /></td>
-                                                        <td className="p-2 border border-gray-700 text-right text-gray-400">{mfData.sales ? <span>{salesDiffRate.toFixed(1)}% <span className="text-[9px] block text-gray-500">(入金ズレ)</span></span> : '-'}</td>
-                                                        <td className={`p-2 border-t border-b border-r border-gray-700 border-l-2 border-l-gray-500 text-center font-bold ${isPurchaseOk ? 'text-green-400' : 'text-red-400'}`}>{mfData.purchase > 0 ? (isPurchaseOk ? 'OK' : '要確認') : '-'}{mfData.purchase > 0 && <div className="text-[9px] font-normal opacity-70">差異:{purchaseDiffRate.toFixed(1)}%</div>}</td>
                                                     </tr>
                                                 );
-                                            })}
+
+                                                return rows;
+                                            })()}
                                         </tbody>
                                     </table>
+
+                                    {/* ★ 修正: 年間合計パネルに販売手数料を追加 */}
+                                    {(() => {
+                                        const yearly = calculateYearlyTotal();
+                                        const yearlySalesDiffVal = (yearly.yearlyOrochiSales - yearly.yearlyOrochiFee) - yearly.yearlyMfSales;
+                                        const yearlySalesDiffRate = yearly.yearlyMfSales ? (Math.abs(yearlySalesDiffVal) / yearly.yearlyMfSales) * 100 : 0;
+                                        const yearlyPurchaseDiffVal = Math.abs(yearly.yearlyOrochiPurchase - yearly.yearlyMfPurchase);
+                                        const yearlyPurchaseDiffRate = yearly.yearlyMfPurchase ? (yearlyPurchaseDiffVal / yearly.yearlyMfPurchase) * 100 : 0;
+                                        const isYearlyPurchaseOk = yearlyPurchaseDiffRate <= 10;
+
+                                        return (
+                                            <div className="mt-4 p-4 bg-gray-900 border border-gray-600 rounded-lg shadow-inner">
+                                                <h5 className="text-sm font-bold text-yellow-400 mb-3 flex items-center gap-2">
+                                                    <i className="fas fa-chart-line"></i> {currentYear}年度 年間合計 (第1期〜第3期合算)
+                                                </h5>
+                                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                                    <div className="bg-gray-800 p-3 rounded border border-gray-700 flex flex-col justify-center">
+                                                        <div className="text-xs text-gray-400 mb-1">オロチ売上 (年間)</div>
+                                                        <div className="text-xl font-mono text-green-300">{yearly.yearlyOrochiSales.toLocaleString()} <span className="text-xs">円</span></div>
+                                                    </div>
+                                                    <div className="bg-gray-800 p-3 rounded border border-gray-700 flex flex-col justify-center">
+                                                        <div className="text-xs text-gray-400 mb-1">オロチ手数料 (年間)</div>
+                                                        <div className="text-xl font-mono text-yellow-300">△ {yearly.yearlyOrochiFee.toLocaleString()} <span className="text-xs">円</span></div>
+                                                    </div>
+                                                    <div className="bg-blue-900/20 p-3 rounded border border-blue-900/50 flex flex-col justify-center relative overflow-hidden">
+                                                        <div className="text-xs text-blue-200 mb-1">MF売上 (年間)</div>
+                                                        <div className="text-xl font-mono text-blue-300">{yearly.yearlyMfSales.toLocaleString()} <span className="text-xs">円</span></div>
+                                                        <div className="text-xs text-gray-400 mt-1">差異: {yearlySalesDiffRate.toFixed(1)}%</div>
+                                                    </div>
+                                                    <div className="bg-gray-800 p-3 rounded border border-gray-700 flex flex-col justify-center">
+                                                        <div className="text-xs text-gray-400 mb-1">オロチ仕入 (年間)</div>
+                                                        <div className="text-xl font-mono text-green-300">{yearly.yearlyOrochiPurchase.toLocaleString()} <span className="text-xs">円</span></div>
+                                                    </div>
+                                                    <div className={`p-3 rounded border flex flex-col justify-center ${isYearlyPurchaseOk ? 'bg-green-900/20 border-green-900/50' : 'bg-red-900/20 border-red-900/50'}`}>
+                                                        <div className="flex justify-between items-start mb-1">
+                                                            <div className={`text-xs ${isYearlyPurchaseOk ? 'text-green-200' : 'text-red-200'}`}>MF仕入 (年間)</div>
+                                                            <span className={`text-xs font-bold px-2 py-0.5 rounded ${isYearlyPurchaseOk ? 'bg-green-800 text-green-100' : 'bg-red-800 text-red-100'}`}>
+                                                                {yearly.yearlyMfPurchase > 0 ? (isYearlyPurchaseOk ? 'OK' : '要確認') : '未判定'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="text-xl font-mono text-white">{yearly.yearlyMfPurchase.toLocaleString()} <span className="text-xs">円</span></div>
+                                                        <div className="text-xs text-gray-400 mt-1">差異: {yearlyPurchaseDiffRate.toFixed(1)}%</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             </td>
                         </tr>
