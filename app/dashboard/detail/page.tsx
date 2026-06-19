@@ -6,8 +6,41 @@ import { db, auth } from '../../../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
-// 店舗リスト
+// 店舗リスト（デフォルト初期値。実際の店舗はタスクごとに動的に保持する）
 const SHOPS = ['Yahoo!', '楽天市場', 'Amazon', 'au PAY', 'Qoo10', 'その他'];
+
+// ★ 要件2: 店舗リストを「固定配列」ではなくタスク単位の動的な {key, name} 配列として扱う。
+//   - key: monthlyData の保存キー（不変。リネームしてもデータが移動しない）
+//   - name: 画面表示・編集用の店舗名
+//   既存データ（店舗名をキーに保存）との互換のため、デフォルトは key=name とする。
+const getTaskShops = (task: any): { key: string; name: string }[] => {
+  const s = task?.details?.shops;
+  if (Array.isArray(s) && s.length > 0) {
+    return s.map((x: any) => (typeof x === 'string' ? { key: x, name: x } : { key: x.key, name: x.name }));
+  }
+  return SHOPS.map((n) => ({ key: n, name: n }));
+};
+
+// ★ 要件3: ECオロチとは独立した「その他の事業」枠（最低2枠）。
+//   no:"6" タスクの details.otherBusinesses に保持する。
+const getOtherBusinesses = (task: any): { id: string; title: string; monthlyData: any }[] => {
+  const o = task?.details?.otherBusinesses;
+  if (Array.isArray(o) && o.length > 0) return o;
+  return [
+    { id: 'other1', title: 'その他事業1', monthlyData: {} },
+    { id: 'other2', title: 'その他事業2', monthlyData: {} },
+  ];
+};
+
+// その他事業の指定月合計（全事業の合算）
+const calculateOtherMonthly = (businesses: any[], month: number) => {
+  let sales = 0, purchase = 0;
+  (businesses || []).forEach((b) => {
+    const m = b?.monthlyData?.[month];
+    if (m) { sales += m.sales || 0; purchase += m.purchase || 0; }
+  });
+  return { sales, purchase };
+};
 
 // 期ごとの対象月定義
 const TERM_MONTHS = {
@@ -28,7 +61,77 @@ const INITIAL_TASKS = [
   },
   { 
     no: "3", name: 'クレジットカードの仕訳登録', clientInput: '', officeStatus: '未',
-    manual: `<p>クレジットカードの利用明細を仕訳登録します。</p><div class="visual-aid-container" style="text-align:left; margin-bottom: 20px;"><h4 style="margin-top:0;">月次作業フロー</h4><ol><li>「連携サービスから入力」画面で対象のカードを選択。</li><li>利用内容に応じた「勘定科目」を選択して登録。</li><li><strong>重要：</strong>貸方科目が「未払金」、補助科目が指定のものになっているか確認。</li></ol></div><details style="border: 1px solid #f1c40f; border-radius: 4px; background-color: #fffdf5;"><summary style="cursor:pointer; padding: 10px; font-weight:bold; color: #d35400; outline:none;"><i class="fas fa-exclamation-triangle"></i> 【重要】設定・入力ミスの防止</summary><div style="padding: 15px; border-top: 1px solid #f1c40f; font-size: 0.95em;"><p><strong>補助科目の集約：</strong>一つのカードで複数の補助科目ができないよう、名称を統一してください。</p></div></details>`
+    manual: `
+      <h3 style="margin-top:0;">マネーフォワード クレジットカード連携・登録時の注意点</h3>
+
+      <div class="attention" style="background-color: #fff1f0; border: 1px solid #ffa39e; border-left: 5px solid #f5222d; padding: 15px; margin-bottom: 20px; border-radius: 4px; color: #333;">
+        <h4 style="color: #a8071a; margin-top: 0; font-weight: bold; border: none; padding: 0;">⚠️ 【最重要】未払金残高不一致の防止</h4>
+        <p style="font-size: 0.9em; margin-bottom: 10px;">カードを連携させたまま何も設定せずに仕訳を計上すると、1つのカードに複数の補助科目が作られてしまいます。これが残高不一致の最大の原因です。</p>
+
+        <div style="display: flex; align-items: center; gap: 10px; background: #fff; padding: 10px; border-radius: 4px;">
+          <div style="flex: 1; text-align: center; border: 1px dashed #ffa39e; padding: 10px; border-radius: 4px;">
+             <strong style="color: #f5222d;">❌ 誤った状態</strong><br>
+             <span style="font-size: 0.8em; color: #666;">カード利用時：</span> アメックス<br>
+             <span style="font-size: 0.8em; color: #666;">預金引落時：</span> アメックス２
+          </div>
+          <div style="font-size: 1.5em; color: #f5222d;">➡️</div>
+          <div style="flex: 1; text-align: center; border: 1px solid #f5222d; padding: 10px; border-radius: 4px; background: #fff1f0;">
+             <strong style="color: #a8071a;">💥 残高がズレる！</strong><br>
+             <span style="font-size: 0.85em;">アメックス残高： 100円</span><br>
+             <span style="font-size: 0.85em; color: red;">アメックス２残高： -100円</span>
+          </div>
+        </div>
+      </div>
+
+      <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+
+      <h4>⚙️ 初期設定（連携後に必ず行うこと）</h4>
+
+      <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+        <div style="flex: 1; background-color: #f0f5ff; border: 1px solid #adc6ff; padding: 15px; border-radius: 4px; color: #333;">
+          <h4 style="color: #1d39c4; font-weight: bold; margin-top: 0; border: none; padding: 0;">1. 補助科目の集約</h4>
+          <p style="font-size: 0.85em;">「Amazonマスター」「ポイント」など複数に分かれた科目を1つにまとめます。</p>
+          <div style="background: #fff; border: 1px solid #ccc; padding: 8px; font-size: 0.8em; border-radius: 3px; font-family: monospace;">
+            [自動で仕訳] ＞ [連携サービスから入力] ＞ [登録済一覧] ＞ [科目設定]
+          </div>
+        </div>
+
+        <div style="flex: 1; background-color: #f0f5ff; border: 1px solid #adc6ff; padding: 15px; border-radius: 4px; color: #333;">
+          <h4 style="color: #1d39c4; font-weight: bold; margin-top: 0; border: none; padding: 0;">2. 名称変更と削除</h4>
+          <p style="font-size: 0.85em;">シンプルな名称（例: 三井住友カード）に変更し、不要な科目をゴミ箱で削除します。</p>
+          <div style="background: #fff; border: 1px solid #ccc; padding: 8px; font-size: 0.8em; border-radius: 3px; font-family: monospace;">
+            [各種設定] ＞ [勘定科目] ＞ 普通預金/未払金 の名称修正
+          </div>
+        </div>
+      </div>
+
+      <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+
+      <h4>🔄 預金引き落とし時の注意とルール修正</h4>
+
+      <div class="note" style="background-color: #f6ffed; border: 1px solid #b7eb8f; border-left: 5px solid #52c41a; padding: 15px; margin-bottom: 20px; border-radius: 4px; color: #333;">
+        <h4 style="color: #237804; margin-top: 0; font-weight: bold; border: none; padding: 0;">💡 3. 引き落とし時の「補助科目」を一致させる</h4>
+        <p style="font-size: 0.9em;">預金から引落とされた際の未払金補助科目を、カード利用時の補助科目と<strong>完全に一致</strong>させます。</p>
+
+        <h4 style="color: #237804; font-weight: bold; margin-top: 15px; border: none; padding: 0;">💡 4. 自動仕訳ルールの修正</h4>
+        <p style="font-size: 0.9em; margin-bottom: 5px;">一度間違えると次回も間違ったルールが適用されるため、ルールの修正が必須です。</p>
+        <div style="background: #fff; border: 1px solid #b7eb8f; padding: 8px; font-size: 0.85em; border-radius: 3px;">
+          [自動で仕訳] ＞ [自動仕訳ルール] ＞ 口座を検索 ＞ 勘定科目を「未払金」、補助科目を「正しい名称」に修正
+        </div>
+      </div>
+
+      <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+
+      <h4>📝 既に誤って計上してしまっている場合</h4>
+
+      <div style="background-color: #fafafa; border: 1px dashed #d9d9d9; padding: 15px; border-radius: 4px; color: #333;">
+        <h4 style="font-weight: bold; margin-top: 0; border: none; padding: 0;">5. 仕訳の一括編集と残高確認</h4>
+        <ul style="font-size: 0.9em; padding-left: 20px;">
+          <li><strong>一括修正：</strong> [会計帳簿] ＞ [仕訳帳] ＞ [一括編集] にて、誤った補助科目を検索し正しいものに一括変更します。</li>
+          <li><strong>最終確認：</strong> [会計帳簿] ＞ [残高試算表(貸借対照表)] にて、不要な科目が残っていないか、マイナス残高がないか確認します。</li>
+        </ul>
+      </div>
+    `
   },
   { 
     no: "3(2)", name: '仕訳取り込みツールにてクレジットカード取り込み', clientInput: '', officeStatus: '未',
@@ -473,6 +576,122 @@ function DetailContent() {
     triggerAutoSave(newTasks, newStatus);
   };
 
+  // ★ 要件2: 店舗の追加
+  const handleAddShop = (taskIndex: number) => {
+    setSaveStatus('changed');
+    const newTasks = [...tasks];
+    const task = JSON.parse(JSON.stringify(newTasks[taskIndex]));
+    if (!task.details) task.details = { monthlyData: {} };
+    const shops = getTaskShops(task);
+    shops.push({ key: `shop_${Date.now()}`, name: '新規店舗' });
+    task.details.shops = shops;
+    newTasks[taskIndex] = task;
+    setTasks(newTasks);
+    const newStatus = updateStatusToInProgress();
+    triggerAutoSave(newTasks, newStatus);
+  };
+
+  // ★ 要件2: 店舗名のインライン編集（key は変えないのでデータは移動しない）
+  const handleRenameShop = (taskIndex: number, shopKey: string, newName: string) => {
+    setSaveStatus('changed');
+    const newTasks = [...tasks];
+    const task = JSON.parse(JSON.stringify(newTasks[taskIndex]));
+    if (!task.details) task.details = { monthlyData: {} };
+    const shops = getTaskShops(task);
+    const target = shops.find((s) => s.key === shopKey);
+    if (target) target.name = newName;
+    task.details.shops = shops;
+    newTasks[taskIndex] = task;
+    setTasks(newTasks);
+    const newStatus = updateStatusToInProgress();
+    triggerAutoSave(newTasks, newStatus);
+  };
+
+  // ★ 要件2: 店舗の削除（入力済みデータも合わせて削除）
+  const handleDeleteShop = (taskIndex: number, shopKey: string) => {
+    setSaveStatus('changed');
+    const newTasks = [...tasks];
+    const task = JSON.parse(JSON.stringify(newTasks[taskIndex]));
+    if (!task.details) task.details = { monthlyData: {} };
+    const shops = getTaskShops(task).filter((s) => s.key !== shopKey);
+    task.details.shops = shops;
+    if (task.details.monthlyData) {
+      Object.keys(task.details.monthlyData).forEach((m) => {
+        if (task.details.monthlyData[m]) delete task.details.monthlyData[m][shopKey];
+      });
+    }
+    newTasks[taskIndex] = task;
+    setTasks(newTasks);
+    const newStatus = updateStatusToInProgress();
+    triggerAutoSave(newTasks, newStatus);
+  };
+
+  // ★ 要件3: その他事業の月次データ入力
+  const handleOtherDataChange = (taskIndex: number, bizId: string, month: number, field: string, value: string) => {
+    setSaveStatus('changed');
+    const newTasks = [...tasks];
+    const task = JSON.parse(JSON.stringify(newTasks[taskIndex]));
+    if (!task.details) task.details = { monthlyData: {} };
+    const businesses = getOtherBusinesses(task);
+    const biz = businesses.find((b) => b.id === bizId);
+    if (biz) {
+      if (!biz.monthlyData) biz.monthlyData = {};
+      if (!biz.monthlyData[month]) biz.monthlyData[month] = {};
+      biz.monthlyData[month][field] = value === '' ? 0 : parseFloat(value);
+    }
+    task.details.otherBusinesses = businesses;
+    task.clientInput = "詳細データ入力済";
+    newTasks[taskIndex] = task;
+    setTasks(newTasks);
+    const newStatus = updateStatusToInProgress();
+    triggerAutoSave(newTasks, newStatus);
+  };
+
+  // ★ 要件3: その他事業のタイトル（事業名）編集
+  const handleOtherTitleChange = (taskIndex: number, bizId: string, value: string) => {
+    setSaveStatus('changed');
+    const newTasks = [...tasks];
+    const task = JSON.parse(JSON.stringify(newTasks[taskIndex]));
+    if (!task.details) task.details = { monthlyData: {} };
+    const businesses = getOtherBusinesses(task);
+    const biz = businesses.find((b) => b.id === bizId);
+    if (biz) biz.title = value;
+    task.details.otherBusinesses = businesses;
+    newTasks[taskIndex] = task;
+    setTasks(newTasks);
+    const newStatus = updateStatusToInProgress();
+    triggerAutoSave(newTasks, newStatus);
+  };
+
+  // ★ 要件3: その他事業の枠を追加
+  const handleAddOtherBusiness = (taskIndex: number) => {
+    setSaveStatus('changed');
+    const newTasks = [...tasks];
+    const task = JSON.parse(JSON.stringify(newTasks[taskIndex]));
+    if (!task.details) task.details = { monthlyData: {} };
+    const businesses = getOtherBusinesses(task);
+    businesses.push({ id: `other_${Date.now()}`, title: `その他事業${businesses.length + 1}`, monthlyData: {} });
+    task.details.otherBusinesses = businesses;
+    newTasks[taskIndex] = task;
+    setTasks(newTasks);
+    const newStatus = updateStatusToInProgress();
+    triggerAutoSave(newTasks, newStatus);
+  };
+
+  // ★ 要件3: その他事業の枠を削除
+  const handleDeleteOtherBusiness = (taskIndex: number, bizId: string) => {
+    setSaveStatus('changed');
+    const newTasks = [...tasks];
+    const task = JSON.parse(JSON.stringify(newTasks[taskIndex]));
+    if (!task.details) task.details = { monthlyData: {} };
+    const businesses = getOtherBusinesses(task).filter((b) => b.id !== bizId);
+    task.details.otherBusinesses = businesses;
+    newTasks[taskIndex] = task;
+    setTasks(newTasks);
+    const newStatus = updateStatusToInProgress();
+    triggerAutoSave(newTasks, newStatus);
+  };
+
   // ★ 修正: ディープコピーで確実に変更を検知させる
   const handleMfDataChange = (taskIndex: number, month: number, field: string, value: string) => {
     setSaveStatus('changed');
@@ -538,6 +757,8 @@ function DetailContent() {
     let yearlyOrochiFee = 0;
     let yearlyMfSales = 0;
     let yearlyMfPurchase = 0;
+    let yearlyOtherSales = 0;
+    let yearlyOtherPurchase = 0;
 
     [1, 2, 3].forEach(term => {
       let termTasks: any[] = [];
@@ -559,6 +780,16 @@ function DetailContent() {
         });
       }
 
+      // ★ 要件3: その他事業の年間合算
+      if (orochiTask?.details?.otherBusinesses) {
+        orochiTask.details.otherBusinesses.forEach((b: any) => {
+          Object.values(b?.monthlyData || {}).forEach((m: any) => {
+            yearlyOtherSales += m.sales || 0;
+            yearlyOtherPurchase += m.purchase || 0;
+          });
+        });
+      }
+
       const mfTask = termTasks.find((t: any) => t.no === "7");
       if (mfTask?.details?.mfData) {
         Object.values(mfTask.details.mfData).forEach((m: any) => {
@@ -568,7 +799,16 @@ function DetailContent() {
       }
     });
 
-    return { yearlyOrochiSales, yearlyOrochiPurchase, yearlyOrochiFee, yearlyMfSales, yearlyMfPurchase };
+    // ★ 要件3: 総売上高・総仕入高（ECオロチ合算 + その他事業合算）
+    const yearlyTotalSales = yearlyOrochiSales + yearlyOtherSales;
+    const yearlyTotalPurchase = yearlyOrochiPurchase + yearlyOtherPurchase;
+
+    return {
+      yearlyOrochiSales, yearlyOrochiPurchase, yearlyOrochiFee,
+      yearlyMfSales, yearlyMfPurchase,
+      yearlyOtherSales, yearlyOtherPurchase,
+      yearlyTotalSales, yearlyTotalPurchase,
+    };
   };
 
   if (loading) return <div className="p-8 text-white">データを読み込んでいます...</div>;
@@ -616,19 +856,26 @@ function DetailContent() {
                   let termOrochiFee = 0;
                   let termMfSales = 0;
                   let termMfPurchase = 0;
-  
+                  let termOtherSales = 0;
+                  let termOtherPurchase = 0;
+
                   const orochiTask = termTasks.find((t: any) => t.no === "6");
                   const mfTask = termTasks.find((t: any) => t.no === "7");
-  
+
                   termMonths.forEach(month => {
                       const orochiTotal = calculateMonthlyTotal(orochiTask?.details?.monthlyData, month);
                       const mfData = mfTask?.details?.mfData?.[month] || { sales: 0, purchase: 0 };
+                      const otherTotal = calculateOtherMonthly(orochiTask?.details?.otherBusinesses, month);
                       termOrochiSales += orochiTotal.sales;
                       termOrochiPurchase += orochiTotal.purchase;
                       termOrochiFee += orochiTotal.fee;
                       termMfSales += mfData.sales;
                       termMfPurchase += mfData.purchase;
+                      termOtherSales += otherTotal.sales;
+                      termOtherPurchase += otherTotal.purchase;
                   });
+                  const termTotalSales = termOrochiSales + termOtherSales;
+                  const termTotalPurchase = termOrochiPurchase + termOtherPurchase;
   
                   return (
                       <div key={term} className="mb-12" style={{ pageBreakInside: 'avoid' }}>
@@ -703,6 +950,45 @@ function DetailContent() {
                                   </table>
                               </div>
                           </div>
+
+                          {/* ★ 要件3: その他事業 + 総集計 (期計) */}
+                          {(termOtherSales > 0 || termOtherPurchase > 0) && (
+                              <div className="mt-4" style={{ pageBreakInside: 'avoid' }}>
+                                  <h4 className="font-bold text-sm mb-2">■ その他事業 集計 (期計)</h4>
+                                  <table className="w-1/2 text-xs text-center border-collapse border border-gray-400">
+                                      <thead>
+                                          <tr className="bg-gray-100">
+                                              <th className="border border-gray-400 p-1.5">売上合計</th>
+                                              <th className="border border-gray-400 p-1.5">仕入合計</th>
+                                          </tr>
+                                      </thead>
+                                      <tbody>
+                                          <tr>
+                                              <td className="border border-gray-400 p-2 text-base">{termOtherSales.toLocaleString()}</td>
+                                              <td className="border border-gray-400 p-2 text-base">{termOtherPurchase.toLocaleString()}</td>
+                                          </tr>
+                                      </tbody>
+                                  </table>
+                              </div>
+                          )}
+
+                          <div className="mt-4" style={{ pageBreakInside: 'avoid' }}>
+                              <h4 className="font-bold text-sm mb-2">■ 総集計 (期計)　＝　ECオロチ ＋ その他事業</h4>
+                              <table className="w-full text-sm text-center border-collapse border-2 border-gray-700">
+                                  <thead>
+                                      <tr className="bg-gray-200">
+                                          <th className="border border-gray-500 p-2">総売上高</th>
+                                          <th className="border border-gray-500 p-2">総仕入高</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody>
+                                      <tr>
+                                          <td className="border border-gray-500 p-2 text-lg font-bold">{termTotalSales.toLocaleString()} 円</td>
+                                          <td className="border border-gray-500 p-2 text-lg font-bold">{termTotalPurchase.toLocaleString()} 円</td>
+                                      </tr>
+                                  </tbody>
+                              </table>
+                          </div>
                       </div>
                   )
               })}
@@ -729,6 +1015,10 @@ function DetailContent() {
                                       <td className="border border-gray-400 p-3 text-right font-bold text-lg">{yearly.yearlyMfSales.toLocaleString()} 円</td>
                                   </tr>
                                   <tr>
+                                      <th className="border border-gray-400 p-3 bg-gray-100 text-left">その他事業 売上 (年間)</th>
+                                      <td className="border border-gray-400 p-3 text-right font-bold text-lg">{yearly.yearlyOtherSales.toLocaleString()} 円</td>
+                                  </tr>
+                                  <tr>
                                       <th className="border border-gray-400 p-3 bg-gray-100 text-left">売上差異</th>
                                       <td className="border border-gray-400 p-3 text-right">
                                           {yearly.yearlyMfSales ? ((Math.abs((yearly.yearlyOrochiSales - yearly.yearlyOrochiFee) - yearly.yearlyMfSales) / yearly.yearlyMfSales) * 100).toFixed(1) + '%' : '-'}
@@ -743,6 +1033,10 @@ function DetailContent() {
                                       <td className="border border-gray-400 p-3 text-right font-bold text-lg">{yearly.yearlyOrochiPurchase.toLocaleString()} 円</td>
                                   </tr>
                                   <tr>
+                                      <th className="border border-gray-400 p-3 bg-gray-100 text-left">その他事業 仕入 (年間)</th>
+                                      <td className="border border-gray-400 p-3 text-right font-bold text-lg">{yearly.yearlyOtherPurchase.toLocaleString()} 円</td>
+                                  </tr>
+                                  <tr>
                                       <th className="border border-gray-400 p-3 bg-gray-100 text-left">MF仕入 (年間)</th>
                                       <td className="border border-gray-400 p-3 text-right font-bold text-lg">{yearly.yearlyMfPurchase.toLocaleString()} 円</td>
                                   </tr>
@@ -754,6 +1048,25 @@ function DetailContent() {
                                   </tr>
                               </tbody>
                           </table>
+                      </div>
+
+                      {/* ★ 要件3: 年間 総売上高・総仕入高 (ECオロチ + その他事業) */}
+                      <div className="mt-6">
+                          <table className="w-full text-base border-collapse border-2 border-black">
+                              <thead>
+                                  <tr className="bg-black text-white">
+                                      <th className="border border-black p-3">{currentYear}年度 総売上高（年間）</th>
+                                      <th className="border border-black p-3">{currentYear}年度 総仕入高（年間）</th>
+                                  </tr>
+                              </thead>
+                              <tbody>
+                                  <tr>
+                                      <td className="border border-black p-3 text-right text-2xl font-bold">{yearly.yearlyTotalSales.toLocaleString()} 円</td>
+                                      <td className="border border-black p-3 text-right text-2xl font-bold">{yearly.yearlyTotalPurchase.toLocaleString()} 円</td>
+                                  </tr>
+                              </tbody>
+                          </table>
+                          <p className="text-xs text-gray-500 mt-1">※ 総売上高・総仕入高 ＝ ECオロチ合算 ＋ その他事業合算</p>
                       </div>
                   </div>
               )}
@@ -948,7 +1261,7 @@ function DetailContent() {
                                     ? 'bg-white border-gray-300 text-gray-900' 
                                     : 'bg-white border-yellow-500/70 text-gray-900 placeholder-gray-400 ring-2 ring-yellow-500/20'
                                 }`} 
-                              placeholder={(task.type === 'sales_input' || task.type === 'sales_check') ? "ボタンから入力" : ""}
+                              placeholder={(task.type === 'sales_input' || task.type === 'sales_check') ? "📊 ボタンから入力" : "✏️ ここに入力してください"}
                               onClick={() => {
                                 if(task.type === 'sales_input' || task.type === 'sales_check') setOpenInputId(openInputId === index ? null : index)
                               }}
@@ -967,56 +1280,131 @@ function DetailContent() {
                       </td>
                     </tr>
 
-                    {openInputId === index && task.type === 'sales_input' && (
+                    {openInputId === index && task.type === 'sales_input' && (() => {
+                        const shops = getTaskShops(task);
+                        const businesses = getOtherBusinesses(task);
+                        const termOrochi = currentMonths.reduce((acc, m) => {
+                            const t = calculateMonthlyTotal(task.details?.monthlyData, m);
+                            acc.sales += t.sales; acc.purchase += t.purchase; acc.fee += t.fee; return acc;
+                        }, { sales: 0, purchase: 0, fee: 0 });
+                        const termOther = currentMonths.reduce((acc, m) => {
+                            const t = calculateOtherMonthly(businesses, m);
+                            acc.sales += t.sales; acc.purchase += t.purchase; return acc;
+                        }, { sales: 0, purchase: 0 });
+                        const termTotalSales = termOrochi.sales + termOther.sales;
+                        const termTotalPurchase = termOrochi.purchase + termOther.purchase;
+
+                        return (
                         <tr className="bg-gray-800/80">
                             <td colSpan={5} className="px-4 py-4 border-b border-gray-700">
+                                {/* === ECオロチ集計（多店舗対応） === */}
                                 <div className="overflow-x-auto">
-                                    <h4 className="text-sm font-bold text-green-400 mb-2">📊 ECオロチ集計データ入力</h4>
-                                    <table className="w-full text-xs text-center border-collapse min-w-[600px]">
-                                        <thead><tr className="bg-gray-900 text-gray-400"><th className="p-2 border border-gray-700 w-16">月</th><th className="p-2 border border-gray-700">店舗</th><th className="p-2 border border-gray-700 bg-yellow-900/10 text-yellow-200">売上合計</th><th className="p-2 border border-gray-700 bg-yellow-900/10 text-yellow-200">仕入合計</th><th className="p-2 border border-gray-700 bg-yellow-900/10 text-yellow-200">手数料合計</th></tr></thead>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="text-sm font-bold text-green-400">📊 ECオロチ集計データ入力（多店舗対応）</h4>
+                                        <button onClick={() => handleAddShop(index)} className="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1 rounded flex items-center gap-1 border border-green-500">
+                                            <i className="fas fa-plus"></i> 店舗を追加
+                                        </button>
+                                    </div>
+                                    <table className="w-full text-xs text-center border-collapse min-w-[640px]">
+                                        <thead><tr className="bg-gray-900 text-gray-400"><th className="p-2 border border-gray-700 w-16">月</th><th className="p-2 border border-gray-700 min-w-[140px]">店舗（編集可）</th><th className="p-2 border border-gray-700 bg-yellow-900/10 text-yellow-200">売上合計</th><th className="p-2 border border-gray-700 bg-yellow-900/10 text-yellow-200">仕入合計</th><th className="p-2 border border-gray-700 bg-yellow-900/10 text-yellow-200">手数料合計</th></tr></thead>
                                         <tbody>
-                                            {(() => {
-                                                let termSales = 0;
-                                                let termPurchase = 0;
-                                                let termFee = 0;
-
-                                                const rows = currentMonths.map(month => (
-                                                    <React.Fragment key={month}>
-                                                        {SHOPS.map((shop, shopIndex) => {
-                                                            const sData = task.details?.monthlyData?.[month]?.[shop] || {};
-                                                            termSales += sData.sales || 0;
-                                                            termPurchase += sData.purchase || 0;
-                                                            termFee += sData.fee || 0;
-
-                                                            return (
-                                                                <tr key={`${month}-${shop}`} className="hover:bg-gray-700">
-                                                                    {shopIndex === 0 && <td rowSpan={SHOPS.length} className="p-2 border border-gray-700 font-bold bg-gray-800">{month}月</td>}
-                                                                    <td className="p-2 border border-gray-700">{shop}</td>
-                                                                    <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop]?.sales || ''} onChange={(e) => handleOrochiDataChange(index, month, shop, 'sales', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
-                                                                    <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop]?.purchase || ''} onChange={(e) => handleOrochiDataChange(index, month, shop, 'purchase', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
-                                                                    <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop]?.fee || ''} onChange={(e) => handleOrochiDataChange(index, month, shop, 'fee', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </React.Fragment>
-                                                ));
-
-                                                rows.push(
-                                                    <tr key="term-total" className="bg-gray-900/80 font-bold border-t-2 border-gray-500">
-                                                        <td colSpan={2} className="p-2 border border-gray-700 text-yellow-400 text-right">期計</td>
-                                                        <td className="p-2 border border-gray-700 text-right text-yellow-400">{termSales.toLocaleString()}</td>
-                                                        <td className="p-2 border border-gray-700 text-right text-yellow-400">{termPurchase.toLocaleString()}</td>
-                                                        <td className="p-2 border border-gray-700 text-right text-yellow-400">{termFee.toLocaleString()}</td>
-                                                    </tr>
-                                                );
-                                                return rows;
-                                            })()}
+                                            {currentMonths.map(month => (
+                                                <React.Fragment key={month}>
+                                                    {shops.map((shop, shopIndex) => (
+                                                        <tr key={`${month}-${shop.key}`} className="hover:bg-gray-700">
+                                                            {shopIndex === 0 && <td rowSpan={shops.length} className="p-2 border border-gray-700 font-bold bg-gray-800">{month}月</td>}
+                                                            <td className="p-1 border border-gray-700">
+                                                                <div className="flex items-center gap-1">
+                                                                    <input type="text" value={shop.name} onChange={(e) => handleRenameShop(index, shop.key, e.target.value)} className="w-full h-8 bg-gray-800 border border-gray-600 text-white px-2 rounded text-left focus:border-green-500" placeholder="店舗名" />
+                                                                    {shops.length > 1 && (
+                                                                        <button onClick={() => handleDeleteShop(index, shop.key)} title="この店舗を削除" className="text-red-400 hover:text-red-300 px-1 flex-shrink-0"><i className="fas fa-times"></i></button>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                            <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop.key]?.sales || ''} onChange={(e) => handleOrochiDataChange(index, month, shop.key, 'sales', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
+                                                            <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop.key]?.purchase || ''} onChange={(e) => handleOrochiDataChange(index, month, shop.key, 'purchase', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
+                                                            <td className="p-1 border border-gray-700"><input type="number" value={task.details?.monthlyData?.[month]?.[shop.key]?.fee || ''} onChange={(e) => handleOrochiDataChange(index, month, shop.key, 'fee', e.target.value)} className="w-full h-8 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-green-500" placeholder="0" /></td>
+                                                        </tr>
+                                                    ))}
+                                                </React.Fragment>
+                                            ))}
+                                            <tr key="term-total" className="bg-gray-900/80 font-bold border-t-2 border-gray-500">
+                                                <td colSpan={2} className="p-2 border border-gray-700 text-yellow-400 text-right">ECオロチ 期計</td>
+                                                <td className="p-2 border border-gray-700 text-right text-yellow-400">{termOrochi.sales.toLocaleString()}</td>
+                                                <td className="p-2 border border-gray-700 text-right text-yellow-400">{termOrochi.purchase.toLocaleString()}</td>
+                                                <td className="p-2 border border-gray-700 text-right text-yellow-400">{termOrochi.fee.toLocaleString()}</td>
+                                            </tr>
                                         </tbody>
                                     </table>
                                 </div>
+
+                                {/* === その他事業（ECオロチとは独立） === */}
+                                <div className="mt-6 overflow-x-auto">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="text-sm font-bold text-purple-300">🏷️ その他の事業（ECオロチ以外）</h4>
+                                        <button onClick={() => handleAddOtherBusiness(index)} className="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1 rounded flex items-center gap-1 border border-purple-500">
+                                            <i className="fas fa-plus"></i> その他事業の枠を追加
+                                        </button>
+                                    </div>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                        {businesses.map((biz) => {
+                                            const bizTerm = currentMonths.reduce((acc, m) => {
+                                                const md = biz.monthlyData?.[m] || {};
+                                                acc.sales += md.sales || 0; acc.purchase += md.purchase || 0; return acc;
+                                            }, { sales: 0, purchase: 0 });
+                                            return (
+                                                <div key={biz.id} className="bg-purple-900/10 border border-purple-800/50 rounded-lg p-3">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <input type="text" value={biz.title} onChange={(e) => handleOtherTitleChange(index, biz.id, e.target.value)} className="flex-grow h-8 bg-gray-800 border border-purple-600 text-purple-100 px-2 rounded text-sm font-bold focus:border-purple-400" placeholder="事業名を入力" />
+                                                        {businesses.length > 1 && (
+                                                            <button onClick={() => handleDeleteOtherBusiness(index, biz.id)} title="この事業枠を削除" className="text-red-400 hover:text-red-300 px-1 flex-shrink-0"><i className="fas fa-trash"></i></button>
+                                                        )}
+                                                    </div>
+                                                    <table className="w-full text-xs text-center border-collapse">
+                                                        <thead><tr className="bg-gray-900 text-gray-400"><th className="p-1.5 border border-gray-700 w-14">月</th><th className="p-1.5 border border-gray-700 bg-yellow-900/10 text-yellow-200">売上</th><th className="p-1.5 border border-gray-700 bg-yellow-900/10 text-yellow-200">仕入</th></tr></thead>
+                                                        <tbody>
+                                                            {currentMonths.map(month => (
+                                                                <tr key={month} className="hover:bg-gray-700">
+                                                                    <td className="p-1 border border-gray-700 font-bold bg-gray-800">{month}月</td>
+                                                                    <td className="p-1 border border-gray-700"><input type="number" value={biz.monthlyData?.[month]?.sales || ''} onChange={(e) => handleOtherDataChange(index, biz.id, month, 'sales', e.target.value)} className="w-full h-7 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-purple-500" placeholder="0" /></td>
+                                                                    <td className="p-1 border border-gray-700"><input type="number" value={biz.monthlyData?.[month]?.purchase || ''} onChange={(e) => handleOtherDataChange(index, biz.id, month, 'purchase', e.target.value)} className="w-full h-7 bg-gray-900 border border-gray-600 text-white px-2 rounded text-right focus:border-purple-500" placeholder="0" /></td>
+                                                                </tr>
+                                                            ))}
+                                                            <tr className="bg-gray-900/80 font-bold border-t-2 border-gray-500">
+                                                                <td className="p-1 border border-gray-700 text-purple-300 text-right">期計</td>
+                                                                <td className="p-1 border border-gray-700 text-right text-purple-300">{bizTerm.sales.toLocaleString()}</td>
+                                                                <td className="p-1 border border-gray-700 text-right text-purple-300">{bizTerm.purchase.toLocaleString()}</td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* === 総集計（ECオロチ + その他事業） === */}
+                                <div className="mt-6 p-4 bg-gradient-to-r from-indigo-900/40 to-gray-900 border-2 border-indigo-500 rounded-lg shadow-lg">
+                                    <h5 className="text-sm font-bold text-indigo-200 mb-3 flex items-center gap-2">
+                                        <i className="fas fa-layer-group"></i> 総集計（第{activeTerm}期）　＝　ECオロチ合算 ＋ その他事業合算
+                                    </h5>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-gray-800 p-3 rounded border border-indigo-700">
+                                            <div className="text-xs text-gray-400 mb-1">総売上高</div>
+                                            <div className="text-2xl font-mono text-indigo-200">{termTotalSales.toLocaleString()} <span className="text-xs">円</span></div>
+                                            <div className="text-[10px] text-gray-500 mt-1">オロチ {termOrochi.sales.toLocaleString()} ＋ その他 {termOther.sales.toLocaleString()}</div>
+                                        </div>
+                                        <div className="bg-gray-800 p-3 rounded border border-indigo-700">
+                                            <div className="text-xs text-gray-400 mb-1">総仕入高</div>
+                                            <div className="text-2xl font-mono text-indigo-200">{termTotalPurchase.toLocaleString()} <span className="text-xs">円</span></div>
+                                            <div className="text-[10px] text-gray-500 mt-1">オロチ {termOrochi.purchase.toLocaleString()} ＋ その他 {termOther.purchase.toLocaleString()}</div>
+                                        </div>
+                                    </div>
+                                </div>
                             </td>
                         </tr>
-                    )}
+                        );
+                    })()}
 
                     {openInputId === index && task.type === 'sales_check' && (
                         <tr className="bg-gray-800/80">
@@ -1130,6 +1518,20 @@ function DetailContent() {
                                                         </div>
                                                         <div className="text-xl font-mono text-white">{yearly.yearlyMfPurchase.toLocaleString()} <span className="text-xs">円</span></div>
                                                         <div className="text-xs text-gray-400 mt-1">差異: {yearlyPurchaseDiffRate.toFixed(1)}%</div>
+                                                    </div>
+                                                </div>
+
+                                                {/* ★ 要件3: 総売上高・総仕入高 (ECオロチ + その他事業) */}
+                                                <div className="mt-4 pt-4 border-t border-gray-700 grid grid-cols-2 gap-4">
+                                                    <div className="bg-indigo-900/30 p-3 rounded border-2 border-indigo-500 flex flex-col justify-center">
+                                                        <div className="text-xs text-indigo-200 mb-1">総売上高 (年間)　＝ オロチ ＋ その他事業</div>
+                                                        <div className="text-2xl font-mono text-indigo-100">{yearly.yearlyTotalSales.toLocaleString()} <span className="text-xs">円</span></div>
+                                                        <div className="text-[10px] text-gray-400 mt-1">オロチ {yearly.yearlyOrochiSales.toLocaleString()} ＋ その他 {yearly.yearlyOtherSales.toLocaleString()}</div>
+                                                    </div>
+                                                    <div className="bg-indigo-900/30 p-3 rounded border-2 border-indigo-500 flex flex-col justify-center">
+                                                        <div className="text-xs text-indigo-200 mb-1">総仕入高 (年間)　＝ オロチ ＋ その他事業</div>
+                                                        <div className="text-2xl font-mono text-indigo-100">{yearly.yearlyTotalPurchase.toLocaleString()} <span className="text-xs">円</span></div>
+                                                        <div className="text-[10px] text-gray-400 mt-1">オロチ {yearly.yearlyOrochiPurchase.toLocaleString()} ＋ その他 {yearly.yearlyOtherPurchase.toLocaleString()}</div>
                                                     </div>
                                                 </div>
                                             </div>

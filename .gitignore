@@ -35,3 +35,6 @@ next-env.d.ts
 # firebase
 .firebase/
 firebase-debug.log
+
+# dual-graph local context cache
+.dual-graph/

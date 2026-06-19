@@ -134,3 +134,66 @@ body {
   background-color: #f2f2f2;
   font-weight: bold;
 }
+
+/* 区切り線・開閉ブロック */
+.manual-content hr {
+  margin: 20px 0;
+  border: none;
+  border-top: 1px solid #ddd;
+}
+
+.manual-content details {
+  margin: 15px 0;
+}
+
+.manual-content summary {
+  cursor: pointer;
+}
+
+/* === ダークモード時の視認性向上 ===
+   画面全体が暗くても、手順書（白・パステル背景）が浮き上がって
+   ハッキリ読めるよう、明るい背景と濃い文字色を強制する。 */
+@media (prefers-color-scheme: dark) {
+  .manual-content {
+    /* 親が白背景でも、暗い環境で内容が映えるよう色を固定 */
+    color: #1a1a1a;
+  }
+
+  /* 白背景コンテナを一段明るく見せ、境界と影で浮き上がらせる */
+  .manual-content.bg-white,
+  .manual-content {
+    background-color: #ffffff;
+  }
+
+  /* 各種ボックスの背景・文字色を固定（ダークモードの継承による色潰れを防止） */
+  .manual-content .attention {
+    background-color: #FFFBEA;
+    color: #6d4c1b;
+  }
+
+  .manual-content .note {
+    background-color: #eafaf1;
+    color: #14633a;
+  }
+
+  .manual-content .code-like,
+  .manual-content code {
+    background-color: #ecf0f1;
+    color: #c7254e;
+  }
+
+  .manual-content th {
+    background-color: #f2f2f2;
+    color: #1a1a1a;
+  }
+
+  .manual-content td {
+    color: #1a1a1a;
+  }
+
+  /* 見出しの下線を維持し、暗背景でも区切りが分かるように */
+  .manual-content h3,
+  .manual-content h4 {
+    color: #2c3e50;
+  }
+}
