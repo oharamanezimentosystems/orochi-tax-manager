@@ -893,8 +893,8 @@ function DetailContent() {
                   const termTotalPurchase = termOrochiPurchase + termOtherPurchase;
   
                   return (
-                      <div key={term} className="mb-12" style={{ pageBreakInside: 'avoid' }}>
-                          <h3 className="text-lg font-bold bg-gray-200 px-3 py-2 border-l-4 border-gray-700 mb-4">
+                      <div key={term} className="mb-12">
+                          <h3 className="text-lg font-bold bg-gray-200 px-3 py-2 border-l-4 border-gray-700 mb-4" style={{ pageBreakAfter: 'avoid' }}>
                               第{term}期 ({termMonths[0]}月〜{termMonths[termMonths.length-1]}月)
                           </h3>
   
