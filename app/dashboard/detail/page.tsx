@@ -55,12 +55,13 @@ const getTermMonths = (closingMonth: number | undefined, term: number): number[]
 };
 
 // ★ 対象年度の表記。法人(決算月が12月以外)は事業年度の期間を明示する
-// 個人/12月決算: "2025年度" / 例:5月決算法人: "2025年6月〜2026年5月"
+// 年度は「決算月(期末)が属する年」を基準とする
+// 個人/12月決算: "2025年度" / 例:5月決算法人で2026年度: "2025年6月〜2026年5月"
 const getFiscalYearLabel = (closingMonth: number | undefined, year: number): string => {
   const cm = closingMonth && closingMonth >= 1 && closingMonth <= 12 ? closingMonth : 12;
   if (cm === 12) return `${year}年度`;
-  const startMonth = (cm % 12) + 1; // 期首月
-  return `${year}年${startMonth}月〜${year + 1}年${cm}月`;
+  const startMonth = (cm % 12) + 1; // 期首月（決算月の翌月、前年）
+  return `${year - 1}年${startMonth}月〜${year}年${cm}月`;
 };
 
 // ★通常タスク (No.1～13)

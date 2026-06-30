@@ -51,7 +51,7 @@
 例) 5月決算法人: 第1期=6〜10月 / 第2期=11〜2月 / 第3期=3〜5月。12月決算(個人含む)は従来通り 1〜5 / 6〜9 / 10〜12 月（完全後方互換）。
 
 - 実装関数: `getTermMonths(closingMonth, term)`（`app/dashboard/page.tsx` および `app/dashboard/detail/page.tsx` に各々定義。詳細画面の旧 `TERM_MONTHS` 定数は廃止）。
-- 対象年度の表記: `getFiscalYearLabel(closingMonth, year)`。12月決算は「YYYY年度」、それ以外は「YYYY年M月〜YYYY+1年M月」（例: 5月決算→「2025年6月〜2026年5月」）。印刷プレビューの見出し・年間合計表に連動。
+- 対象年度の表記: `getFiscalYearLabel(closingMonth, year)`。年度は「決算月(期末)が属する年」を基準とする。12月決算は「YYYY年度」、それ以外は「YYYY-1年M月〜YYYY年M月」（例: 5月決算で2026年度→「2025年6月〜2026年5月」）。印刷プレビューの見出し・年間合計表に連動。
 - 月次データ(`monthlyData[month]` / `mfData[month]`)は月番号キー方式のため、決算月変更後も非表示月のデータは保持される（非破壊マージ）。
 
 ### 売上入力タスク (`no: "6"`, `type: 'sales_input'`) の `details`
