@@ -35,6 +35,25 @@
 - `year_{YYYY}_term{1|2|3}_tasks`: その期のタスク配列（`INITIAL_TASKS` をベースにマージ）
 - 各タスク `task` の主なフィールド: `no`, `name`, `clientInput`, `officeStatus`, `memo`, `manual`(HTML文字列), `type`
 
+### 法人設定（決算月の動的シフト）
+顧問先ドキュメント直下に事業形態の設定を保持する。
+
+- `isCorporate` (boolean): 法人なら `true`、個人事業主または未設定なら `false`。
+- `closingMonth` (number): 決算月 (1〜12)。個人/未設定は実質12月決算扱い。
+- 設定UI: ダッシュボードの「顧問先設定モーダル」(`app/dashboard/page.tsx`) で個人/法人を切り替え、法人時のみ決算月セレクトを表示。
+
+#### 各期の対象月の動的算出ルール
+決算月を起点に、期首＝決算月の翌月として各期の対象月を割り振る（5ヶ月・4ヶ月・3ヶ月）。
+- 第1期: 期首から5ヶ月
+- 第2期: 第3期の直前4ヶ月
+- 第3期: 決算月およびその直前2ヶ月（計3ヶ月）
+
+例) 5月決算法人: 第1期=6〜10月 / 第2期=11〜2月 / 第3期=3〜5月。12月決算(個人含む)は従来通り 1〜5 / 6〜9 / 10〜12 月（完全後方互換）。
+
+- 実装関数: `getTermMonths(closingMonth, term)`（`app/dashboard/page.tsx` および `app/dashboard/detail/page.tsx` に各々定義。詳細画面の旧 `TERM_MONTHS` 定数は廃止）。
+- 対象年度の表記: `getFiscalYearLabel(closingMonth, year)`。12月決算は「YYYY年度」、それ以外は「YYYY年M月〜YYYY+1年M月」（例: 5月決算→「2025年6月〜2026年5月」）。印刷プレビューの見出し・年間合計表に連動。
+- 月次データ(`monthlyData[month]` / `mfData[month]`)は月番号キー方式のため、決算月変更後も非表示月のデータは保持される（非破壊マージ）。
+
 ### 売上入力タスク (`no: "6"`, `type: 'sales_input'`) の `details`
 - `monthlyData[month][shopKey] = { sales, purchase, fee }`
   - **店舗は動的**。`details.shops = [{ key, name }]` で保持（`key`=不変の保存キー / `name`=表示・編集名）。
@@ -56,6 +75,7 @@
 - クレジットカード仕訳の図解入りマニュアル（No.3。ダークモードでも視認性確保）
 - ECオロチ売上の多店舗（複数アカウント）対応 + その他事業 + 総集計
 - 印刷・PDF出力プレビュー（期別／年間）
+- 法人化対応（決算月に応じた各期対象月の動的シフト。個人事業主＝12月決算で後方互換）
 
 ## 6. デプロイ手順（Firebase Hosting）
 静的エクスポートを `out/` に生成し、Firebase Hosting へデプロイする。

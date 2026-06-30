@@ -28,6 +28,24 @@ const formatDate = (dateString?: string) => {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 };
 
+// ★ 決算月に応じた各期の対象月を動的に算出
+// 計算ルール: 第3期=決算月＋直前2ヶ月(計3) / 第2期=その直前4ヶ月 / 第1期=期首から5ヶ月
+// closingMonth 未設定(個人事業主)は12月決算とみなし、従来通り 1-5 / 6-9 / 10-12 になる
+const getTermMonths = (closingMonth: number | undefined, term: 1 | 2 | 3): number[] => {
+  const cm = closingMonth && closingMonth >= 1 && closingMonth <= 12 ? closingMonth : 12;
+  const start = (cm % 12) + 1; // 期首月（決算月の翌月）
+  const fiscalMonths = Array.from({ length: 12 }, (_, i) => ((start - 1 + i) % 12) + 1);
+  if (term === 1) return fiscalMonths.slice(0, 5);
+  if (term === 2) return fiscalMonths.slice(5, 9);
+  return fiscalMonths.slice(9, 12);
+};
+
+// ★ 期の月範囲ラベル（例: "1月～5月"）
+const getTermRangeLabel = (closingMonth: number | undefined, term: 1 | 2 | 3): string => {
+  const months = getTermMonths(closingMonth, term);
+  return `${months[0]}月～${months[months.length - 1]}月`;
+};
+
 export default function Dashboard() {
   const router = useRouter();
   const [clients, setClients] = useState<ClientData[]>([]);
@@ -95,7 +113,11 @@ export default function Dashboard() {
     if (!editingClient) return;
     try {
       const docRef = doc(db, "clients", editingClient.id);
-      await updateDoc(docRef, { email: editingClient.email });
+      await updateDoc(docRef, {
+        email: editingClient.email,
+        isCorporate: editingClient.isCorporate ?? false,
+        closingMonth: editingClient.isCorporate ? (editingClient.closingMonth ?? 12) : 12,
+      });
       setClients(prev => prev.map(c => c.id === editingClient.id ? editingClient : c));
       setIsSettingsOpen(false);
       alert('設定を保存しました');
@@ -252,9 +274,9 @@ ${url}
                 <thead>
                 <tr className="bg-gray-900 text-gray-300 text-sm border-b border-gray-700">
                     <th className="p-4 border-r border-gray-700 w-1/4">顧問先名 / 操作</th>
-                    <th className="p-4 border-r border-gray-700 text-center w-1/4">第1期(1月～5月)</th>
-                    <th className="p-4 border-r border-gray-700 text-center w-1/4">第2期(6月～9月)</th>
-                    <th className="p-4 text-center w-1/4">第3期(10月～12月)</th>
+                    <th className="p-4 border-r border-gray-700 text-center w-1/4">第1期</th>
+                    <th className="p-4 border-r border-gray-700 text-center w-1/4">第2期</th>
+                    <th className="p-4 text-center w-1/4">第3期</th>
                 </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-700">
@@ -297,9 +319,14 @@ ${url}
                     </td>
                     {['term1', 'term2', 'term3'].map((termKey) => {
                         const status = getStatusForYear(client, termKey);
+                        const termNum = Number(termKey.replace('term', '')) as 1 | 2 | 3;
                         return (
                         <td key={termKey} className="p-4 border-r border-gray-700 last:border-r-0 align-top">
                             <div className="flex flex-col gap-2 pointer-events-none">
+                            <div className="text-center text-[11px] text-blue-300 font-mono -mt-1 mb-0.5">
+                                {getTermRangeLabel(client.closingMonth, termNum)}
+                                {client.isCorporate && <span className="ml-1 text-[9px] text-amber-400 align-middle">法人</span>}
+                            </div>
                             <div className="flex justify-between items-center bg-gray-900/50 p-2 rounded border border-gray-700/50">
                                 <span className="text-[10px] text-gray-400 uppercase tracking-wider">顧問先</span>
                                 <div className="flex flex-col items-end">
@@ -359,6 +386,49 @@ ${url}
                   <label className="block text-sm text-gray-400 mb-1">連絡用メールアドレス</label>
                   <input type="email" value={editingClient.email || ''} onChange={(e) => setEditingClient({...editingClient, email: e.target.value})} className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 outline-none" />
                 </div>
+
+                {/* 法人設定 */}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">事業形態</label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="businessType"
+                        checked={!editingClient.isCorporate}
+                        onChange={() => setEditingClient({ ...editingClient, isCorporate: false })}
+                        className="accent-blue-500"
+                      />
+                      <span className="text-white">個人事業主</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="businessType"
+                        checked={!!editingClient.isCorporate}
+                        onChange={() => setEditingClient({ ...editingClient, isCorporate: true, closingMonth: editingClient.closingMonth || 12 })}
+                        className="accent-blue-500"
+                      />
+                      <span className="text-white">法人</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* 法人選択時のみ決算月セレクト */}
+                {editingClient.isCorporate && (
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">決算月</label>
+                    <select
+                      value={editingClient.closingMonth || 12}
+                      onChange={(e) => setEditingClient({ ...editingClient, closingMonth: Number(e.target.value) })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white focus:border-blue-500 outline-none"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                        <option key={m} value={m}>{m}月決算</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="flex justify-end gap-3 mt-8">
                 <button onClick={() => setIsSettingsOpen(false)} className="px-4 py-2 text-sm text-gray-300 hover:text-white transition-colors">キャンセル</button>

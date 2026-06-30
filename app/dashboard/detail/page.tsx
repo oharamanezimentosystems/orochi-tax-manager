@@ -42,11 +42,25 @@ const calculateOtherMonthly = (businesses: any[], month: number) => {
   return { sales, purchase };
 };
 
-// 期ごとの対象月定義
-const TERM_MONTHS = {
-  1: [1, 2, 3, 4, 5],
-  2: [6, 7, 8, 9],
-  3: [10, 11, 12]
+// ★ 決算月に応じた各期の対象月を動的に算出
+// 計算ルール: 第3期=決算月＋直前2ヶ月(計3) / 第2期=その直前4ヶ月 / 第1期=期首から5ヶ月
+// closingMonth 未設定(個人事業主)は12月決算とみなし、従来通り 1-5 / 6-9 / 10-12 になる
+const getTermMonths = (closingMonth: number | undefined, term: number): number[] => {
+  const cm = closingMonth && closingMonth >= 1 && closingMonth <= 12 ? closingMonth : 12;
+  const start = (cm % 12) + 1; // 期首月（決算月の翌月）
+  const fiscalMonths = Array.from({ length: 12 }, (_, i) => ((start - 1 + i) % 12) + 1);
+  if (term === 1) return fiscalMonths.slice(0, 5);
+  if (term === 2) return fiscalMonths.slice(5, 9);
+  return fiscalMonths.slice(9, 12);
+};
+
+// ★ 対象年度の表記。法人(決算月が12月以外)は事業年度の期間を明示する
+// 個人/12月決算: "2025年度" / 例:5月決算法人: "2025年6月〜2026年5月"
+const getFiscalYearLabel = (closingMonth: number | undefined, year: number): string => {
+  const cm = closingMonth && closingMonth >= 1 && closingMonth <= 12 ? closingMonth : 12;
+  if (cm === 12) return `${year}年度`;
+  const startMonth = (cm % 12) + 1; // 期首月
+  return `${year}年${startMonth}月〜${year + 1}年${cm}月`;
 };
 
 // ★通常タスク (No.1～13)
@@ -842,14 +856,14 @@ function DetailContent() {
                   </div>
                   <div className="text-right">
                       <h2 className="text-xl font-bold border border-black px-4 py-1.5 inline-block bg-gray-100">
-                          {currentYear}年度 作業報告書 ({printTarget === 'yearly' ? '年間合計' : `第${printTarget}期`})
+                          {getFiscalYearLabel(fullData?.closingMonth, currentYear)} 作業報告書 ({printTarget === 'yearly' ? '年間合計' : `第${printTarget}期`})
                       </h2>
                   </div>
               </div>
   
               {termsToPrint.map(term => {
                   const termTasks = term === activeTerm ? tasks : (fullData?.[`year_${currentYear}_term${term}_tasks`] || []);
-                  const termMonths = TERM_MONTHS[term as keyof typeof TERM_MONTHS];
+                  const termMonths = getTermMonths(fullData?.closingMonth, term);
   
                   let termOrochiSales = 0;
                   let termOrochiPurchase = 0;
@@ -996,7 +1010,7 @@ function DetailContent() {
               {printTarget === 'yearly' && (
                   <div className="mt-8 pt-8 border-t-2 border-black" style={{ pageBreakInside: 'avoid' }}>
                       <h3 className="text-xl font-bold bg-black text-white px-4 py-2 mb-6 inline-block">
-                          {currentYear}年度 年間合計表
+                          {getFiscalYearLabel(fullData?.closingMonth, currentYear)} 年間合計表
                       </h3>
                       <div className="flex gap-8">
                           <table className="w-1/2 text-sm border-collapse border border-gray-400">
@@ -1055,8 +1069,8 @@ function DetailContent() {
                           <table className="w-full text-base border-collapse border-2 border-black">
                               <thead>
                                   <tr className="bg-black text-white">
-                                      <th className="border border-black p-3">{currentYear}年度 総売上高（年間）</th>
-                                      <th className="border border-black p-3">{currentYear}年度 総仕入高（年間）</th>
+                                      <th className="border border-black p-3">{getFiscalYearLabel(fullData?.closingMonth, currentYear)} 総売上高（年間）</th>
+                                      <th className="border border-black p-3">{getFiscalYearLabel(fullData?.closingMonth, currentYear)} 総仕入高（年間）</th>
                                   </tr>
                               </thead>
                               <tbody>
@@ -1076,7 +1090,7 @@ function DetailContent() {
   }
   // ▲▲▲ ここまで印刷プレビュー用 ▲▲▲
 
-  const currentMonths = TERM_MONTHS[activeTerm as keyof typeof TERM_MONTHS];
+  const currentMonths = getTermMonths(fullData?.closingMonth, activeTerm);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4 flex flex-col">
@@ -1154,7 +1168,8 @@ function DetailContent() {
           <div className="flex gap-2 mb-6 p-1 bg-gray-800 rounded-lg border border-gray-700">
             {[1, 2, 3].map((term) => {
                 const isActive = activeTerm === term;
-                const monthsText = `${TERM_MONTHS[term as keyof typeof TERM_MONTHS][0]}月～${TERM_MONTHS[term as keyof typeof TERM_MONTHS][TERM_MONTHS[term as keyof typeof TERM_MONTHS].length-1]}月`;
+                const tMonths = getTermMonths(fullData?.closingMonth, term);
+                const monthsText = `${tMonths[0]}月～${tMonths[tMonths.length-1]}月`;
                 const termLabel = term === 3 ? "決算・確定申告" : `第${term}期`;
                 
                 return (
@@ -1489,7 +1504,7 @@ function DetailContent() {
                                         return (
                                             <div className="mt-4 p-4 bg-gray-900 border border-gray-600 rounded-lg shadow-inner">
                                                 <h5 className="text-sm font-bold text-yellow-400 mb-3 flex items-center gap-2">
-                                                    <i className="fas fa-chart-line"></i> {currentYear}年度 年間合計 (第1期〜第3期合算)
+                                                    <i className="fas fa-chart-line"></i> {getFiscalYearLabel(fullData?.closingMonth, currentYear)} 年間合計 (第1期〜第3期合算)
                                                 </h5>
                                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                                                     <div className="bg-gray-800 p-3 rounded border border-gray-700 flex flex-col justify-center">
