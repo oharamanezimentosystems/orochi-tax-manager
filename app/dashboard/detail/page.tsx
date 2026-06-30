@@ -856,7 +856,7 @@ function DetailContent() {
                       <h1 className="text-3xl font-bold">{clientName} 様</h1>
                   </div>
                   <div className="text-right">
-                      <h2 className="text-xl font-bold border border-black px-4 py-1.5 inline-block bg-gray-100">
+                      <h2 className="text-xl font-bold border border-black px-4 py-1.5 inline-block bg-gray-100 whitespace-nowrap">
                           {getFiscalYearLabel(fullData?.closingMonth, currentYear)} 作業報告書 ({printTarget === 'yearly' ? '年間合計' : `第${printTarget}期`})
                       </h2>
                   </div>
