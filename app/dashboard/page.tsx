@@ -77,11 +77,13 @@ export default function Dashboard() {
   const [isManualOpen, setIsManualOpen] = useState(false);       
   const [editingClient, setEditingClient] = useState<ClientData | null>(null);
   const [newClientName, setNewClientName] = useState('');
-  // 【2026-09-06追加】MF/freee連携完了後の window.alert() を廃止。
-  //  alert()はJS実行を止めるモーダルダイアログのため、OAuthコールバック直後に
-  //  自動発火すると、その後のブラウザ自動操作（クリック等）が一切効かなくなってしまう
-  //  （ダイアログを閉じるまで他の操作を受け付けない）。非ブロッキングな画面上部バナーに置き換える。
-  const [connectBanner, setConnectBanner] = useState<{ tone: 'ok' | 'err'; msg: string } | null>(null);
+  // 【2026-09-06追加・同日拡張】window.alert() を全面的に廃止。
+  //  alert()はJS実行を止めるモーダルダイアログのため、①OAuthコールバック直後に自動発火する
+  //  と以後のブラウザ自動操作を一切受け付けなくなり、②手動クリック起点（保存・追加・コピー等）
+  //  でも「閉じるまで次の操作ができない」というUX上のデメリットは変わらない。
+  //  画面上部の非ブロッキングなバナー1本に統一する（MF/freee連携・設定保存・顧問先追加・
+  //  URLコピー・メール未登録など、この画面の通知はすべてこれを使う）。
+  const [banner, setBanner] = useState<{ tone: 'ok' | 'err'; msg: string } | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -103,25 +105,25 @@ export default function Dashboard() {
     const freeeConnected = params.get('freeeConnected');
     const freeeError = params.get('freeeError');
     // 【2026-09-06修正】router.replace()は静的エクスポート配信のこのアプリだと実質フルページ遷移を
-    //  引き起こし、setConnectBannerした直後にReactの状態ごとリセットされてバナーが一瞬で消えてしまう
+    //  引き起こし、setBannerした直後にReactの状態ごとリセットされてバナーが一瞬で消えてしまう
     //  （以前はalert()がJS実行を同期的にブロックしていたため露見しなかった副作用）。
     //  ページ遷移を伴わない window.history.replaceState でURLのクエリだけを消す。
     const clearQuery = () => window.history.replaceState(null, '', '/dashboard');
     if (mfConnected) {
       const officeName = params.get('officeName');
-      setConnectBanner({ tone: 'ok', msg: `✅ MFクラウドとの連携が完了しました${officeName ? `（${officeName}）` : ''}` });
+      setBanner({ tone: 'ok', msg: `✅ MFクラウドとの連携が完了しました${officeName ? `（${officeName}）` : ''}` });
       fetchClients();
       clearQuery();
     } else if (mfError) {
-      setConnectBanner({ tone: 'err', msg: `⚠️ MFクラウド連携に失敗しました: ${decodeURIComponent(mfError)}` });
+      setBanner({ tone: 'err', msg: `⚠️ MFクラウド連携に失敗しました: ${decodeURIComponent(mfError)}` });
       clearQuery();
     } else if (freeeConnected) {
       const companyName = params.get('companyName');
-      setConnectBanner({ tone: 'ok', msg: `✅ freeeとの連携が完了しました${companyName ? `（${companyName}）` : ''}` });
+      setBanner({ tone: 'ok', msg: `✅ freeeとの連携が完了しました${companyName ? `（${companyName}）` : ''}` });
       fetchClients();
       clearQuery();
     } else if (freeeError) {
-      setConnectBanner({ tone: 'err', msg: `⚠️ freee連携に失敗しました: ${decodeURIComponent(freeeError)}` });
+      setBanner({ tone: 'err', msg: `⚠️ freee連携に失敗しました: ${decodeURIComponent(freeeError)}` });
       clearQuery();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -180,43 +182,43 @@ export default function Dashboard() {
       });
       setClients(prev => prev.map(c => c.id === editingClient.id ? editingClient : c));
       setIsSettingsOpen(false);
-      alert('設定を保存しました');
+      setBanner({ tone: 'ok', msg: '✅ 設定を保存しました' });
     } catch (error) {
       console.error("保存エラー:", error);
-      alert('保存に失敗しました');
+      setBanner({ tone: 'err', msg: '⚠️ 保存に失敗しました' });
     }
   };
 
   // 顧問先追加
   const handleAddClient = async () => {
-    if (!newClientName.trim()) return alert('顧問先名を入力してください');
+    if (!newClientName.trim()) { setBanner({ tone: 'err', msg: '⚠️ 顧問先名を入力してください' }); return; }
     try {
       const docRef = await addDoc(collection(db, "clients"), {
         name: newClientName,
         email: '',
         createdAt: new Date()
       });
-      alert('顧問先を追加しました');
+      setBanner({ tone: 'ok', msg: '✅ 顧問先を追加しました' });
       setNewClientName('');
       setIsAddClientOpen(false);
-      fetchClients(); 
+      fetchClients();
     } catch (error) {
       console.error("追加エラー:", error);
-      alert('追加に失敗しました');
+      setBanner({ tone: 'err', msg: '⚠️ 追加に失敗しました' });
     }
   };
 
   // URLコピー機能
   const copyClientUrl = (e: React.MouseEvent, clientId: string) => {
-    e.stopPropagation(); 
+    e.stopPropagation();
     const origin = window.location.origin;
     const url = `${origin}/dashboard/detail?id=${clientId}`;
-    
+
     navigator.clipboard.writeText(url).then(() => {
-      alert(`以下のURLをコピーしました！\n顧問先に送信してください。\n\n${url}`);
+      setBanner({ tone: 'ok', msg: `✅ 以下のURLをコピーしました！顧問先に送信してください。\n${url}` });
     }).catch(err => {
       console.error('コピー失敗:', err);
-      alert('コピーに失敗しました。手動でコピーしてください。\n' + url);
+      setBanner({ tone: 'err', msg: `⚠️ コピーに失敗しました。手動でコピーしてください。\n${url}` });
     });
   };
 
@@ -226,7 +228,7 @@ export default function Dashboard() {
     const toEmail = client.email ? client.email.trim() : '';
     
     if (!toEmail) {
-      alert("メールアドレスが登録されていません。「設定」ボタンから登録してください。");
+      setBanner({ tone: 'err', msg: '⚠️ メールアドレスが登録されていません。「設定」ボタンから登録してください。' });
       return;
     }
 
@@ -297,12 +299,12 @@ ${url}
       </aside>
 
       <main className="flex-1 p-8 overflow-x-auto relative flex flex-col min-h-screen">
-        {connectBanner && (
+        {banner && (
           <div
-            className={`mb-4 px-4 py-3 rounded border flex items-center justify-between ${connectBanner.tone === 'ok' ? 'bg-green-900/40 border-green-600 text-green-200' : 'bg-red-900/40 border-red-600 text-red-200'}`}
+            className={`mb-4 px-4 py-3 rounded border flex items-center justify-between whitespace-pre-line ${banner.tone === 'ok' ? 'bg-green-900/40 border-green-600 text-green-200' : 'bg-red-900/40 border-red-600 text-red-200'}`}
           >
-            <span className="text-sm font-bold">{connectBanner.msg}</span>
-            <button onClick={() => setConnectBanner(null)} className="text-xs opacity-70 hover:opacity-100 ml-4">✕ 閉じる</button>
+            <span className="text-sm font-bold">{banner.msg}</span>
+            <button onClick={() => setBanner(null)} className="text-xs opacity-70 hover:opacity-100 ml-4 shrink-0">✕ 閉じる</button>
           </div>
         )}
         <div className="flex-grow">
