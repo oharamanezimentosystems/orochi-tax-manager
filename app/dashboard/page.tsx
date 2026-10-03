@@ -292,6 +292,12 @@ ${url}
           <button onClick={() => setIsManualOpen(true)} className="w-full text-left block py-2.5 px-4 rounded hover:bg-gray-700 text-gray-300 mt-4 border border-gray-600">
              📖 業務マニュアル
           </button>
+          <button onClick={() => router.push('/dashboard/audit-instructions')} className="w-full text-left block py-2.5 px-4 rounded hover:bg-gray-700 text-gray-300 border border-gray-600">
+             🧾 チェック指示書
+          </button>
+          <button onClick={() => router.push('/dashboard/audit-records')} className="w-full text-left block py-2.5 px-4 rounded hover:bg-gray-700 text-gray-300 border border-gray-600">
+             🗂 チェック記録・除外
+          </button>
         </nav>
         <div className="p-4 border-t border-gray-700">
           <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white">ログアウト</button>

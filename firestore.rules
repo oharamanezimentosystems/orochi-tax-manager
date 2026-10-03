@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 顧問先データ。顧問先は共有URLで未ログインのまま読み書きするため、現状は開放のまま。
+    // （顧問先用の認証方式を見直すまでの暫定。見直し後にここを絞る）
+    match /clients/{id} {
+      allow read, write: if true;
+    }
+
+    // MF/freeeのトークン・認可状態。Cloud Functions（Admin SDK）専用。ブラウザからは一切不可。
+    match /oauth_tokens/{id}       { allow read, write: if false; }
+    match /oauth_tokens_freee/{id} { allow read, write: if false; }
+    match /oauth_state/{id}        { allow read, write: if false; }
+
+    // チェック記録・除外設定・指示書。事務所のログイン済みユーザーのみ。
+    match /audit_records/{id}                { allow read, write: if request.auth != null; }
+    match /audit_instructions/{id}           { allow read, write: if request.auth != null; }
+    match /audit_instructions_history/{id}   { allow read, write: if request.auth != null; }
+
+    // 上記以外は全て拒否（明示）。
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

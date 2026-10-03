@@ -562,7 +562,7 @@ function DetailContent() {
   const [mfPanel, setMfPanel] = useState<{
     loading: boolean;
     error: string | null;
-    connectedAccounts: { id: string; name: string; isManual: boolean; lastTransactionDate: string | null; stale: boolean; syncStatus?: string | null }[];
+    connectedAccounts: { id: string; name: string; isManual: boolean; lastTransactionDate: string | null; stale: boolean; checkFailed?: boolean; syncStatus?: string | null }[];
     unconfirmedCount: number | null;
     negativeBalances: { name: string; amount: number; type: string }[];
     monthlySales: Record<string, { sales: number; purchase: number }>;
@@ -855,8 +855,14 @@ function DetailContent() {
         [clientStatusKey]: statusToSave
       };
 
+      // 完了日は「完了になった瞬間」だけ記録する。すでに完了済みの期は、自動保存や再度開いた
+      // ときの保存で上書きしない（既存の completedAt を保持する）。
+      const prevTerm = fullData?.[`year_${year}`]?.[`term${term}`];
+      const keepCompletedAt = prevTerm?.clientStatus === '完了' && prevTerm?.completedAt;
+      const completedAtToSave: string = keepCompletedAt ? prevTerm.completedAt : new Date().toISOString();
+
       if (statusToSave === '完了') {
-        updates[completedAtKey] = new Date().toISOString();
+        updates[completedAtKey] = completedAtToSave;
       }
 
       await updateDoc(docRef, updates);
@@ -873,7 +879,7 @@ function DetailContent() {
                 ...newTermData, 
                 officeStatus: newOfficeStatus,
                 clientStatus: statusToSave,
-                completedAt: statusToSave === '完了' ? new Date().toISOString() : newTermData.completedAt
+                completedAt: statusToSave === '完了' ? completedAtToSave : newTermData.completedAt
             }
           }
         };
@@ -1642,6 +1648,8 @@ function DetailContent() {
                   <div className="text-gray-400 mb-1">口座連携</div>
                   {(() => {
                     const staleAccounts = mfPanel.connectedAccounts.filter(a => a.stale);
+                    // MF APIの取得エラー（呼び出し制限など）は「同期停止」ではないので別扱いにする
+                    const failedCount = mfPanel.connectedAccounts.filter(a => a.checkFailed).length;
                     return staleAccounts.length > 0 ? (
                       <>
                         <div className="text-lg font-bold text-red-400">⚠ {staleAccounts.length}件 要確認</div>
@@ -1659,7 +1667,13 @@ function DetailContent() {
                     ) : (
                       <>
                         <div className="text-lg font-bold text-white">{mfPanel.connectedAccounts.length}件 連携中</div>
-                        <div className="text-[9px] text-gray-500 mt-1">直近取引日ベースの推定で異常なし。</div>
+                        {failedCount > 0 ? (
+                          <div className="text-[9px] text-yellow-400 mt-1">
+                            {failedCount}件は取得に失敗したため判定できていません（「再取得」で再度お試しください）。
+                          </div>
+                        ) : (
+                          <div className="text-[9px] text-gray-500 mt-1">直近取引日ベースの推定で異常なし。</div>
+                        )}
                       </>
                     );
                   })()}
