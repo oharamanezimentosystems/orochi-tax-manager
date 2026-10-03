@@ -325,7 +325,7 @@ APIレスポンスのみで判断して「不具合では」と誤診断した�
 
 ## 12. 顧問先チェック（Claude Code用の指示書・記録・除外）
 Claude Code が顧問先の進捗とMF/アプリの入力状況をチェックするための仕組み。
-指示書の本文は `audit-instructions.md`（リポジトリ内の原本）。画面上の「使い方」と業務マニュアル3章にも説明がある。
+指示書の本文は `audit-instructions.md`（リポジトリ内の原本）。
 
 ### 12-1. 画面（サイドバーのボタンから開く。どちらも要ログイン）
 - `/dashboard/audit-instructions`（🧾チェック指示書）: 指示書の閲覧・ダウンロード・上書きアップロード。
@@ -334,10 +334,12 @@ Claude Code が顧問先の進捗とMF/アプリの入力状況をチェック�
   Claude Code は事務所のログイン済みブラウザ（Claude in Chrome）でこの画面を開いて読み書きする。
 
 ### 12-2. Firestore
-- `audit_records/{顧問先ID}`: `exceptions`（チェックから外す口座・カード。対象名・除外項目・理由・指示した人・登録日時）
-  と `history`（期ごとの最終チェック日・指摘の要約・催促メールの下書き作成日）。
-- `audit_instructions/{id}` / `audit_instructions_history/{id}`: 指示書の現在の版と過去の版。
-- 初期登録: 照井さんの三井住友カード（未仕訳のみ除外。理由: クラウド出納帳で入力）。マイナス残高は除外しない。
+- `audit_records/{顧問先ID}`
+  - `exceptions[]`: チェックから外す口座・カード。`target`（対象名）, `items[]`（除外する項目。例: 未仕訳）,
+    `reason`, `instructedBy`（指示した人）, `addedAt` ほか。同じ`target`の再登録は上書き。
+  - `history[]`: 期ごとの最終チェック日・指摘の要約・催促メールの下書き作成日。最新100件を保持。
+- `audit_instructions/current`: 現在の版。`audit_instructions_history/v{N}`: 各版（過去の版を残す）。
+- 除外の対象になるのは項目単位。マイナス残高は、運用上、除外項目にしない（指示書§4-3）。
 
 ### 12-3. セキュリティルール（`firestore.rules`、`firebase.json`の`firestore.rules`で指定）
 - `clients`: 開放のまま（顧問先は共有URLで未ログインのまま読み書きするため。認証方式の見直し後に絞る）。
