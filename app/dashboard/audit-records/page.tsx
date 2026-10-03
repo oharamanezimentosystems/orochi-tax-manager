@@ -162,6 +162,31 @@ export default function AuditRecordsPage() {
           除外の登録は事務所の指示があったときだけ行ってください。
         </p>
 
+        <details open className="mb-6 bg-gray-800 border border-gray-700 rounded p-4 text-sm">
+          <summary className="cursor-pointer font-bold text-blue-300">📖 使い方</summary>
+          <div className="mt-3 space-y-3 text-gray-300">
+            <div>
+              <div className="font-bold text-white">この画面は何をするところか</div>
+              <ul className="list-disc ml-5 space-y-1 mt-1">
+                <li><b>除外設定</b>：クラウド出納帳など、連携明細を使わない口座・カードを、チェックから外す設定です。</li>
+                <li><b>チェック履歴</b>：いつ・どの期をチェックし、何を指摘し、催促メールの下書きをいつ作ったかの記録です。</li>
+              </ul>
+            </div>
+            <div>
+              <div className="font-bold text-white">操作</div>
+              <ol className="list-decimal ml-5 space-y-1 mt-1">
+                <li>上の「顧問先」を選ぶと、その顧問先の除外設定と履歴が表示されます。</li>
+                <li>除外したい口座・カードがあるときは、名前・除外する項目・理由・指示した人を入れて「除外を登録」。</li>
+                <li>除外を外すときは、その行の「削除」を押します。</li>
+              </ol>
+            </div>
+            <div className="text-yellow-300">
+              ※ 除外は事務所の指示があったときだけ登録してください（AIが自分の判断で追加することはありません）。
+              マイナス残高は除外しない運用です。履歴は通常Claude Codeが自動で記録するので、手で入力するのは修正したいときだけです。
+            </div>
+          </div>
+        </details>
+
         {banner && (
           <div
             data-testid="banner"

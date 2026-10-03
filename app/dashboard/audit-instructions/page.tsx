@@ -157,6 +157,30 @@ export default function AuditInstructionsPage() {
           改定したときはここへ上書きアップロードしてください（版番号が上がり、過去の版は残ります）。
         </p>
 
+        <details open className="mb-6 bg-gray-800 border border-gray-700 rounded p-4 text-sm">
+          <summary className="cursor-pointer font-bold text-blue-300">📖 使い方</summary>
+          <div className="mt-3 space-y-3 text-gray-300">
+            <div>
+              <div className="font-bold text-white">チェックを実行する（各PCで1回だけ準備）</div>
+              <ol className="list-decimal ml-5 space-y-1 mt-1">
+                <li>下の「現在の版」から<b>ダウンロード</b>し、Claude Code を使うフォルダに置く。</li>
+                <li>Claude Code に「<code className="bg-gray-900 px-1 rounded">audit-instructions-vN.md に従って顧問先をチェックして</code>」と伝える（N は版番号）。</li>
+                <li>顧問先の入力状況とMFの状況を読み取り専用で調べ、顧問先宛てのGmail<b>下書き</b>と事務所向けレポートを作ります。<b>メールは送信されません</b>。下書きを確認して、事務所で送ってください。</li>
+                <li>結果は「🗂 チェック記録・除外」に履歴として残ります。同じ指摘のメールは7日あけて再作成されます。</li>
+              </ol>
+            </div>
+            <div>
+              <div className="font-bold text-white">指示書を直したいとき</div>
+              <ol className="list-decimal ml-5 space-y-1 mt-1">
+                <li>現在の版をダウンロードして内容を修正する。</li>
+                <li>下の「上書きアップロード」で改定メモを書いて保存する（新しい版になり、古い版は履歴に残ります）。</li>
+                <li>間違えたときは履歴の「この版に戻す」で戻せます。</li>
+                <li>他のPCは、新しい版を再ダウンロードして差し替えてください。</li>
+              </ol>
+            </div>
+          </div>
+        </details>
+
         {banner && (
           <div
             className={`mb-4 px-4 py-2 rounded border text-sm flex justify-between items-center ${
