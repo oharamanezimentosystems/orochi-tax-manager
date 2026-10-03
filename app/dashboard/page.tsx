@@ -726,6 +726,15 @@ ${url}
                     <li><strong>データの保存：</strong> 入力内容は自動保存されます。</li>
                   </ul>
                 </div>
+
+                <div className="mt-8">
+                  <h4 className="text-lg font-bold border-b-2 border-blue-500 mb-4 pb-2">3. 顧問先チェック（Claude Code）</h4>
+                  <ul className="list-disc pl-5 space-y-2">
+                    <li><strong>🧾 チェック指示書：</strong> Claude Code が顧問先をチェックするときの手順書です。ダウンロードして各PCに置き、「audit-instructions-vN.md に従って顧問先をチェックして」と伝えます。改定は同じ画面で上書きアップロードします（古い版は残ります）。</li>
+                    <li><strong>実行結果：</strong> 顧問先宛てのGmail<strong>下書き</strong>と事務所向けレポートができます。メールは自動送信されません。内容を確認して事務所で送ってください。</li>
+                    <li><strong>🗂 チェック記録・除外：</strong> 顧問先ごとのチェック履歴と、チェックから外す口座・カード（例：クラウド出納帳で入力しているカード）の設定です。除外は事務所の指示があったときだけ登録します。マイナス残高は除外しません。</li>
+                  </ul>
+                </div>
               </div>
               <div className="p-4 border-t bg-gray-50 text-right">
                 <button onClick={() => setIsManualOpen(false)} className="px-6 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded">閉じる</button>
