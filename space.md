@@ -42,7 +42,7 @@
 | 顧問先データ・期・保存キー・集計 | 4章 |
 | 保存処理を触る（**必読**） | 11章（`tasksReady`ガード。データ消失事故の対策） |
 | MF連携 | 9章、`mf-integration-design.md` |
-| freee連携 | 10章 |
+| freee連携 | 10章（アプリ再登録・権限申請は`freee-integration-design.md`） |
 | 顧問先チェック・指示書・記録 | 12章、`audit-instructions.md` |
 | デプロイ | 6章（Functionsは9-8章） |
 
@@ -175,6 +175,7 @@ firebase deploy --only firestore:rules --project orochi-tax-manager   # ルー�
   何のアプリか・どこに何があるかを掴むための地図として使い、機能の詳細が増えたら専用の設計書へ分ける。
 - **`mf-integration-design.md`**: MFクラウド連携機能の詳細設計書。要件の背景・
   検討過程・未確定事項の記録が目的で、実装完了後も履歴として残す（実装状況はspace.mdの9章に反映）。
+- **`freee-integration-design.md`**: freeeアプリの登録・スコープ（10-3）と、銀行明細アクセスを見送った判断（10-5）。
 - **`audit-instructions.md`**: Claude Codeによる顧問先チェックの指示書の原本（12章）。
 
 運用ルール（space.mdを再び肥大させないために）:
@@ -269,6 +270,9 @@ firebase deploy --only functions --project orochi-tax-manager   # バックエ�
 （`src/freee.js`）。フロントエンドの月次チェックパネルは`accountingSystem`の値（`'mf' | 'freee'`）で
 表示を出し分ける単一実装（`app/dashboard/detail/page.tsx`）。
 
+アプリ登録・スコープの設定（10-3）と、見送った機能＝銀行明細アクセスの判断（10-5）は
+`freee-integration-design.md` を参照。アプリの再登録や権限申請を検討するときに読む。
+
 ### 10-1. OAuth認可は顧問先ごとに個別に必要（MFと同じ）
 freeeのOAuthは1回の認可で複数事業所にアクセスできるわけではない。`GET /api/1/companies`は所属事業所を
 全件返す（認可スコープと無関係）が、実際のデータ取得APIは認可時に選んだ1事業所以外を指定すると
@@ -282,18 +286,6 @@ freeeのOAuthは1回の認可で複数事業所にアクセスできるわけで
 ### 10-2. Firestoreデータ
 - `clients/{id}.accountingSystem`(`'freee'`) / `.freeeCompanyId` / `.freeeCompanyName` / `.freeeConnectedAt`
 - `oauth_tokens_freee/{clientsドキュメントID}`: 顧問先ごとのアクセストークン・リフレッシュトークン。
-
-### 10-3. アプリ登録・スコープ
-- freeeアプリストア（`app.secure.freee.co.jp/developers`）に**税理士小原司事務所自身のfreeeアカウントの
-  事業所コンテキストで**登録すること（顧問先の事業所コンテキストで登録すると、その顧問先のアプリに
-  なってしまい、編集権限エラー「更新権限がありません」が出る）。
-- アプリタイプ: パブリックアプリ（顧問先数が将来6事業所以上になりうるため）。
-- 金融サービス・銀行明細取得: いずれも「なし」で登録済み（銀行明細＝`wallet_txns`アクセスは審査制で
-  承認されるとトークン全失効という重い副作用があるため見送り。詳細は10-5参照）。
-- 権限: `[freee会計] 勘定科目`・`事業所情報`・`貸借対照表`・`損益計算書`・`口座`の参照のみ（更新権限は不要）。
-- トークンエンドポイントは`application/x-www-form-urlencoded`で呼ぶこと（JSON形式は未検証）。
-  Client Secretは目視の書き起こしではなく、DOMから直接コピーしてSecret Managerへ登録すること
-  （文字を誤読すると`invalid_grant`エラーになる）。
 
 ### 10-4. 月次チェックパネル（freee版・MFとの違い）
 1. **口座連携**: `GET /api/1/walletables?with_sync_status=true&with_last_synced_at=true`の
@@ -329,17 +321,6 @@ freeeの公式ドキュメントだけでは`fiscal_year`/`start_month`/`end_mon
   時系列的に**逆行**する組み合わせ（例: 期末に近い月→期首に近い月）を指定した場合に発生する。
 - 事業所の`company.fiscal_years`（開始日・終了日）から対象月を含む年度を判定し、
   `fiscal_year`＝その年度開始日の西暦年を渡す（`freee.js::resolveFiscalYear`）。
-
-### 10-5. 見送った機能（銀行明細アクセス）
-未仕訳の正確な件数取得・MF同様の一括仕訳登録機能には、freeeの「銀行明細取得」権限
-（`wallet_txns`アクセス、事前審査制）が必要。以下の理由で現時点では申請を見送っている。
-- freeeは自前で一括登録・自動で経理機能を持つため、MFほど自作の価値が高くない。
-- 審査には数週間かかる可能性があり、標準審査期間は非公開。
-- **承認されると、その時点で発行済みの全アクセストークン・リフレッシュトークンが即時に強制失効する**
-  （公式仕様）。つまり後から取得すると、その時点で連携済みの全顧問先に再認可を依頼する必要がある。
-- 現在の`/api/*`エンドポイントの認証モデル（clientIdを知っていれば誰でも呼べる。9-6参照）は、
-  freeeの審査基準（アクセス権限統制）と相性が悪く、素通りしない可能性が高いと判断した。
-必要になった場合は、事前に上記の認証モデルの見直しとセットで検討すること。
 
 ## 11. 【重要・事故防止】`tasksReady`ガード（2026-09-05）
 
