@@ -103,7 +103,7 @@
 
 - 例) 5月決算法人: 位置1〜5(第1期)は画面上「6月〜10月」、位置6〜9(第2期)は「11月〜2月」、位置10〜12(第3期)は「3月〜5月」と表示されるが、Firestore上の保存キーはあくまで1〜12のまま。
 - 12月決算(個人含む)は position=暦月 となり従来通り 1〜5 / 6〜9 / 10〜12 月（完全後方互換）。
-- **注意**: 保存キーを暦月に変換して使うと、既存の位置番号ベースの保存データと不整合になり画面上でデータが消えたように見える不具合を過去に起こしたため、保存キーとしては絶対に使わないこと。
+- **注意**: 保存キーに暦月を使うと、位置番号ベースの既存データと不整合になり、画面上でデータが消えたように見える。保存キーとしては絶対に使わない。
 - 対象年度の表記: `getFiscalYearLabel(closingMonth, year)`。年度は「決算月(期末)が属する年」を基準とする。12月決算は「YYYY年度」、それ以外は「YYYY-1年M月〜YYYY年M月」（例: 5月決算で2026年度→「2025年6月〜2026年5月」）。印刷プレビューの見出し・年間合計表に連動。
 - ダッシュボード一覧（`app/dashboard/page.tsx`）の期間表記のみを担う `getTermMonths(closingMonth, term)` は月次データを参照しないため、暦月を直接返す実装のままで問題ない（detail側とは別実装）。
 
@@ -118,8 +118,7 @@
 - `mfData[month] = { sales, purchase }`（連携先会計ソフトの実績。仕入は誤差10%以内で判定）
 - `accountingSystem`が`'mf'`または`'freee'`の顧問先は、この値は手入力ではなく連携先の会計ソフトAPIから
   画面を開くたびに自動取得・自動保存される（詳細は9・10章）。手入力欄は表示しない（読み取り専用表示。
-  この読み取り専用判定は`accountingSystem`が`'mf'`／`'freee'`いずれの場合も効くようにすること。
-  過去に`'mf'`のみを判定条件にしていたためfreee連携済みの顧問先で手入力欄が表示され続けるバグがあった）。
+  この読み取り専用判定は`accountingSystem`が`'mf'`／`'freee'`のどちらでも効くようにすること）。
 
 ### 会計システム連携設定（顧問先ドキュメント直下）
 - `accountingSystem`: `'mf' | 'freee' | null`。未設定の顧問先は本節の対象外で、従来通り
@@ -172,8 +171,7 @@ firebase deploy --only firestore:rules --project orochi-tax-manager   # ルー�
 
 ## 7. 顧問先名編集（顧問先設定モーダル）
 `app/dashboard/page.tsx`の`saveSettings()`は`name`フィールドも含めて`updateDoc`する。
-顧問先名の`<input>`も`onChange`で編集可能（過去に`disabled`のまま`onChange`未実装というバグが
-あったが修正済み）。
+顧問先名の`<input>`は`onChange`で編集できる。
 
 ## 8. 設計ドキュメントの関係
 - **`space.md`（本ファイル）**: システム全体の「as-built」仕様書。実装済みの内容を常に最新化する。
@@ -275,10 +273,9 @@ firebase deploy --only functions --project orochi-tax-manager   # バックエ�
 表示を出し分ける単一実装（`app/dashboard/detail/page.tsx`）。
 
 ### 10-1. OAuth認可は顧問先ごとに個別に必要（MFと同じ）
-設計時点では「freeeのOAuthはアカウント単位なので1回の認可で複数事業所にアクセス可能」と想定していたが、
-**実測で誤りと判明**。`GET /api/1/companies`は所属事業所を全件返す（認可スコープと無関係）が、
-実際のデータ取得APIは認可時に選んだ1事業所以外を指定すると「この事業所にアクセスする権限がありません」
-で拒否される。そのためMFと全く同じく、`stateStore.js`を流用して顧問先ごとに個別のOAuth認可・
+freeeのOAuthは1回の認可で複数事業所にアクセスできるわけではない。`GET /api/1/companies`は所属事業所を
+全件返す（認可スコープと無関係）が、実際のデータ取得APIは認可時に選んだ1事業所以外を指定すると
+「この事業所にアクセスする権限がありません」で拒否される。そのためMFと全く同じく、`stateStore.js`を流用して顧問先ごとに個別のOAuth認可・
 個別トークン保存（`oauth_tokens_freee/{clientsドキュメントID}`）を行う。
 
 認可完了時、`resolveAuthorizedCompany()`が「所属事業所一覧の中から実際にAPIアクセスできる1件」を
@@ -292,15 +289,14 @@ firebase deploy --only functions --project orochi-tax-manager   # バックエ�
 ### 10-3. アプリ登録・スコープ
 - freeeアプリストア（`app.secure.freee.co.jp/developers`）に**税理士小原司事務所自身のfreeeアカウントの
   事業所コンテキストで**登録すること（顧問先の事業所コンテキストで登録すると、その顧問先のアプリに
-  なってしまい編集権限エラー「更新権限がありません」が出る。事実、一度誤って水野様の事業所
-  コンテキストで作成してしまい、事務所コンテキストに切り替えて作り直した経緯がある）。
+  なってしまい、編集権限エラー「更新権限がありません」が出る）。
 - アプリタイプ: パブリックアプリ（顧問先数が将来6事業所以上になりうるため）。
 - 金融サービス・銀行明細取得: いずれも「なし」で登録済み（銀行明細＝`wallet_txns`アクセスは審査制で
   承認されるとトークン全失効という重い副作用があるため見送り。詳細は10-5参照）。
 - 権限: `[freee会計] 勘定科目`・`事業所情報`・`貸借対照表`・`損益計算書`・`口座`の参照のみ（更新権限は不要）。
-- トークンエンドポイントは`application/x-www-form-urlencoded`で呼ぶこと（JSON形式でも通る場合があるが
-  未検証。Client Secretは目視でのスクリーンショット書き起こしではなく、DOMから直接コピーして
-  Secret Managerへ登録すること。実際に文字の誤読で`invalid_grant`エラーが発生した経緯がある）。
+- トークンエンドポイントは`application/x-www-form-urlencoded`で呼ぶこと（JSON形式は未検証）。
+  Client Secretは目視の書き起こしではなく、DOMから直接コピーしてSecret Managerへ登録すること
+  （文字を誤読すると`invalid_grant`エラーになる）。
 
 ### 10-4. 月次チェックパネル（freee版・MFとの違い）
 1. **口座連携**: `GET /api/1/walletables?with_sync_status=true&with_last_synced_at=true`の
@@ -318,15 +314,13 @@ firebase deploy --only functions --project orochi-tax-manager   # バックエ�
 3. **マイナス残高**: 残高試算表(`reports/trial_bs`)から`closing_balance`がマイナスの科目を抽出
    （MFと同じロジック）。
 4. **売上・仕入**: `reports/trial_pl`から**月別内訳を算出してMFと同じ形でタスクNo.7の`mfData`へ
-   自動反映する**（`freee.js::getMonthlySalesPurchase`。当初「月別内訳は未実装」としていたが実装済み。
-   算出方法は10-4a参照）。ロック（`officeStatus === '承認完了'`時は自動上書きしない）もMFと同じ挙動。
+   自動反映する**（`freee.js::getMonthlySalesPurchase`。算出方法は10-4a参照）。ロック（`officeStatus === '承認完了'`時は自動上書きしない）もMFと同じ挙動。
 5. **AI監査 指摘事項**: MFと共通、プレースホルダーのみ。
 
 ### 10-4a. freeeの`trial_pl`パラメータ仕様（実測で確定）
-freeeの公式ドキュメントだけでは`fiscal_year`/`start_month`/`end_month`の意味が確定できず、
-APIレスポンスのみで判断して「不具合では」と誤診断した経緯があるため、**freeeの実UI
-（分析・レポート＞損益レポート、および会計帳簿＞損益計算書（月次）の月次推移表）と突き合わせて
-実測確定した仕様**を記録する。
+freeeの公式ドキュメントだけでは`fiscal_year`/`start_month`/`end_month`の意味が確定できないため、
+**freeeの実UI（分析・レポート＞損益レポート、および会計帳簿＞損益計算書（月次）の月次推移表）と
+突き合わせて実測確定した仕様**を記録する。APIレスポンスだけで判断しないこと。
 
 - `end_month`は**暦月そのもの**（1=1月〜12=12月）。会計年度内の位置番号ではない。
 - `start_month`を省略し`fiscal_year`と`end_month`だけを指定すると、**その会計年度の真の期首から
