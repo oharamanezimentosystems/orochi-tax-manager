@@ -22,12 +22,15 @@
 │   ├── dashboard/         # 管理者向け機能
 │   │   ├── page.tsx       # 進捗管理マトリクス
 │   │   ├── detail/page.tsx# 顧問先別タスク管理・数値突合・印刷プレビュー
-│   │   └── import/page.tsx# JSONデータインポート機能
+│   │   ├── import/page.tsx# JSONデータインポート機能
+│   │   ├── audit-instructions/page.tsx # チェック指示書の保管・版管理（12章）
+│   │   └── audit-records/page.tsx      # チェック履歴・除外設定（12章）
 │   └── client/            # 顧問先向け機能
 │       └── page.tsx       # 顧問先用タスク報告画面（未使用のモックアップ。実際に顧問先へ
 │                           # 配布されるURLは `dashboard/detail?id=...` であり、こちらではない）
 ├── lib/
 │   └── firebase.ts        # Firebase初期化設定
+├── firestore.rules        # Firestoreセキュリティルール（12章）
 ├── public/                # 静的リソース (マニュアル用画像等)
 └── next.config.ts         # Next.js設定 (output: 'export' 等)
 ```
@@ -97,6 +100,10 @@
   非対応。詳細は10章）
 - 突合パネル・印刷帳票のUI文言は、MF/freee共通の概念（売上仕入突合・未払金残高確認等）は
   「会計ソフト」という汎用表記に統一し、MF固有の操作手順（画面遷移等）のみ「マネーフォワード」表記を残す
+- 顧問先チェック（Claude Code用の指示書の版管理、チェック履歴・除外設定。詳細は12章）
+- 完了日（`completedAt`）は「完了になった瞬間」だけ記録する。すでに完了済みの期は再保存しても
+  上書きしない（`detail/page.tsx`の保存処理）
+- MF口座連携の取得失敗（`checkFailed`。呼び出し制限など）は「同期停止」と区別して表示する
 - お客様入力欄の未入力可視化（期タブごとの未入力件数バッジ、テーブル上部の「未入力: N件」サマリーと
   次の未入力へジャンプする機能、未入力セルへの赤バッジ表示）
 
@@ -106,6 +113,7 @@
 ```bash
 npm run build                                   # out/ を生成（output: 'export'）
 firebase deploy --only hosting --project orochi-tax-manager
+firebase deploy --only firestore:rules --project orochi-tax-manager   # ルール変更時
 ```
 
 - Firebase プロジェクトID: `orochi-tax-manager`
@@ -314,3 +322,29 @@ APIレスポンスのみで判断して「不具合では」と誤診断した�
 - 顧問先データの復旧はFirestoreの標準機能では基本的にできない（PITR未使用・既定の
   バージョン保持は1時間のみ）。バックアップ拡張機能・定期エクスポートも現時点で未導入。
   よってこの節のガードが**唯一の防御線**である。安易に外さないこと。
+
+## 12. 顧問先チェック（Claude Code用の指示書・記録・除外）
+Claude Code が顧問先の進捗とMF/アプリの入力状況をチェックするための仕組み。
+指示書の本文は `audit-instructions.md`（リポジトリ内の原本）。画面上の「使い方」と業務マニュアル3章にも説明がある。
+
+### 12-1. 画面（サイドバーのボタンから開く。どちらも要ログイン）
+- `/dashboard/audit-instructions`（🧾チェック指示書）: 指示書の閲覧・ダウンロード・上書きアップロード。
+  上書きのたびに版番号が+1。過去の版はダウンロード・「この版に戻す」が可能。
+- `/dashboard/audit-records`（🗂チェック記録・除外）: 顧問先ごとの除外設定とチェック履歴の閲覧・編集。
+  Claude Code は事務所のログイン済みブラウザ（Claude in Chrome）でこの画面を開いて読み書きする。
+
+### 12-2. Firestore
+- `audit_records/{顧問先ID}`: `exceptions`（チェックから外す口座・カード。対象名・除外項目・理由・指示した人・登録日時）
+  と `history`（期ごとの最終チェック日・指摘の要約・催促メールの下書き作成日）。
+- `audit_instructions/{id}` / `audit_instructions_history/{id}`: 指示書の現在の版と過去の版。
+- 初期登録: 照井さんの三井住友カード（未仕訳のみ除外。理由: クラウド出納帳で入力）。マイナス残高は除外しない。
+
+### 12-3. セキュリティルール（`firestore.rules`、`firebase.json`の`firestore.rules`で指定）
+- `clients`: 開放のまま（顧問先は共有URLで未ログインのまま読み書きするため。認証方式の見直し後に絞る）。
+- `oauth_tokens` / `oauth_tokens_freee` / `oauth_state`: ブラウザから一切不可（Cloud Functions専用）。
+- `audit_records` / `audit_instructions` / `audit_instructions_history`: ログイン済みユーザーのみ。
+- 上記以外は全て拒否。
+
+### 12-4. 運用ルール
+- AIは `exceptions` を自分の判断で追加・変更しない（事務所の指示があったときだけ登録）。
+- メールは下書きまで。送信はしない。MFへの書き込みもしない（読み取り専用）。
