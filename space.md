@@ -384,8 +384,16 @@ Claude Code が顧問先の進捗とMF/アプリの入力状況をチェック�
 - `clients`: 開放のまま（顧問先は共有URLで未ログインのまま読み書きするため。認証方式の見直し後に絞る）。
 - `oauth_tokens` / `oauth_tokens_freee` / `oauth_state`: ブラウザから一切不可（Cloud Functions専用）。
 - `audit_records` / `audit_instructions` / `audit_instructions_history`: ログイン済みユーザーのみ。
+  **この「ログイン済み」が守りとして効く前提**: Firebase Authentication の「作成（登録）を許可する」をオフにしてある（2026-10-06）。
+  ログイン方法は「メール/パスワード」のみで、事務所は共通のアカウントを使う。アプリ側に新規登録の機能は無い。
+  このチェックをオンに戻すと、アプリの公開情報だけで誰でもアカウントを作れ、上記3つのルールが事実上の公開になる。
+  アカウントを増やす必要が出たときは、Firebaseコンソールから追加する（オフのままでも追加できる）。
 - 上記以外は全て拒否。
 
 ### 12-4. 運用ルール
 - AIは `exceptions` を自分の判断で追加・変更しない（事務所の指示があったときだけ登録）。
+- **窓口の合言葉（`AUDIT_MCP_KEY`）の扱い**: Firestoreや画面、リポジトリには置かない（顧問先のMFデータが読めてしまうため）。
+  従業員への配布は「登録手順書」のテキストに合言葉を入れて渡す（事務所の外へ出さない）。
+  漏れた・なくしたときは、`firebase functions:secrets:set AUDIT_MCP_KEY` で作り直して `orochiAuditMcp` を再デプロイし、各PCの登録をやり直す。
+  各PCの登録コマンドは `claude mcp add --scope user --transport http orochi-audit <窓口のURL> --header "x-audit-mcp-key: <合言葉>"`。
 - メールは下書きまで。送信はしない。MFへの書き込みもしない（読み取り専用）。
