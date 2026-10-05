@@ -354,13 +354,23 @@ freeeの公式ドキュメントだけでは`fiscal_year`/`start_month`/`end_mon
 
 ## 12. 顧問先チェック（Claude Code用の指示書・記録・除外）
 Claude Code が顧問先の進捗とMF/アプリの入力状況をチェックするための仕組み。
-指示書の本文は `audit-instructions.md`（リポジトリ内の原本）。
+**チェックの本体は専用のMCPサーバー（窓口）**。ルール・期の計算・除外の適用・MF/freeeの取得は窓口側に入っており、
+各PCに指示書やこの設計書を配る必要はない（2026-10-06に、md配布方式から切り替え）。
+`audit-instructions.md` は窓口の使い方の説明書（リポジトリ内の原本）。
+
+### 12-0. 窓口（MCPサーバー `orochi-audit`）
+- 実体: 別リポジトリ `C:\Users\t_oha\マネーフォワードのMCPテスト\functions\src\auditMcp.js`（Firebase Functions `orochiAuditMcp`、
+  `https://asia-northeast1-orochi-tax-manager.cloudfunctions.net/orochiAuditMcp`）。`mfAccountingApi` とは認証モデルが違うため別Functions（`bridge.js` と同じ考え方）。
+- 認証: 事務所共通の合言葉（シークレット `AUDIT_MCP_KEY`、ヘッダ `x-audit-mcp-key`）。各PCは `claude mcp add` で1回登録する。
+- 機能: `list_clients` / `get_term_check` / `get_audit_records`（以上は読み取り専用）、`record_check_result`（履歴のみ書く）、`add_exception`（除外のみ書く。事務所の指示があったときだけ）。
+- MF/freeeへは**取得系だけ**を呼ぶ。書き込み（一括仕訳登録など）は窓口に存在しない。`clients` の入力データにも触れない。
+- MFは1秒あたりの呼び出し上限（429）があるため、取得は順番に行い、除外口座の件数が数えられなかったときは除外後の件数を出さない（判定不能）。
 
 ### 12-1. 画面（サイドバーのボタンから開く。どちらも要ログイン）
 - `/dashboard/audit-instructions`（🧾チェック指示書）: 指示書の閲覧・ダウンロード・上書きアップロード。
   上書きのたびに版番号が+1。過去の版はダウンロード・「この版に戻す」が可能。
 - `/dashboard/audit-records`（🗂チェック記録・除外）: 顧問先ごとの除外設定とチェック履歴の閲覧・編集。
-  Claude Code は事務所のログイン済みブラウザ（Claude in Chrome）でこの画面を開いて読み書きする。
+  Claude Code は窓口経由で同じデータを読み書きする（ブラウザ操作は不要）。人が見る・直すときはこの画面を使う。
 
 ### 12-2. Firestore
 - `audit_records/{顧問先ID}`

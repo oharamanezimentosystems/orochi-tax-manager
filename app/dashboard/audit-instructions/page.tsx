@@ -153,30 +153,26 @@ export default function AuditInstructionsPage() {
         </button>
         <h1 className="text-2xl font-bold mb-1">顧問先チェック指示書</h1>
         <p className="text-sm text-gray-400 mb-6">
-          Claude Code が顧問先をチェックするときに従う指示書です。ダウンロードして各PCのフォルダに置き、
-          改定したときはここへ上書きアップロードしてください（版番号が上がり、過去の版は残ります）。
+          Claude Code で顧問先をチェックするための、窓口（MCP）の使い方の説明書を保管・版管理する画面です。
+          改定したときは、ここへ上書きアップロードしてください（版番号が上がり、過去の版は残ります）。
         </p>
 
         <details open className="mb-6 bg-gray-800 border border-gray-700 rounded p-4 text-sm">
-          <summary className="cursor-pointer font-bold text-blue-300">📖 使い方</summary>
+          <summary className="cursor-pointer font-bold text-blue-300">📖 使い方（MCP版）</summary>
           <div className="mt-3 space-y-3 text-gray-300">
             <div>
               <div className="font-bold text-white">チェックを実行する（各PCで1回だけ準備）</div>
               <ol className="list-decimal ml-5 space-y-1 mt-1">
-                <li>下の「現在の版」から<b>ダウンロード</b>し、Claude Code を使うフォルダに置く。</li>
-                <li>Claude Code に「<code className="bg-gray-900 px-1 rounded">audit-instructions-vN.md に従って顧問先をチェックして</code>」と伝える（N は版番号）。</li>
-                <li>顧問先の入力状況とMFの状況を読み取り専用で調べ、顧問先宛てのGmail<b>下書き</b>と事務所向けレポートを作ります。<b>メールは送信されません</b>。下書きを確認して、事務所で送ってください。</li>
+                <li>管理者から「事務所の合言葉」を聞く。</li>
+                <li>Claude Code に、専用の窓口（orochi-audit）を登録する。登録のコマンドは、下の「現在の版」の内容にある「使い方」を参照。</li>
+                <li>登録後は、Claude Code に「顧問先をチェックして」と頼むだけです。チェックのルールと計算は窓口の側に入っているので、ファイルを配る必要はありません。</li>
+                <li>顧問先の入力状況とMFの状況は読み取り専用で調べます。MFへの書き込みはできない作りです。<b>メールは送信されません</b>。</li>
                 <li>結果は「🗂 チェック記録・除外」に履歴として残ります。同じ指摘のメールは7日あけて再作成されます。</li>
               </ol>
             </div>
             <div>
-              <div className="font-bold text-white">指示書を直したいとき</div>
-              <ol className="list-decimal ml-5 space-y-1 mt-1">
-                <li>現在の版をダウンロードして内容を修正する。</li>
-                <li>下の「上書きアップロード」で改定メモを書いて保存する（新しい版になり、古い版は履歴に残ります）。</li>
-                <li>間違えたときは履歴の「この版に戻す」で戻せます。</li>
-                <li>他のPCは、新しい版を再ダウンロードして差し替えてください。</li>
-              </ol>
+              <div className="font-bold text-white">この画面のファイルについて</div>
+              <p className="mt-1">下の「現在の版」は、窓口の使い方の説明書です（保管・版管理用）。ルール自体は窓口のプログラムの中にあり、直すときは管理者が行います。</p>
             </div>
           </div>
         </details>
