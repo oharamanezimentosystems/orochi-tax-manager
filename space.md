@@ -188,6 +188,7 @@ firebase deploy --only firestore:rules --project orochi-tax-manager   # ルー�
 ### 9-1. 全体アーキテクチャ
 - 会計データAPIとの通信は、本プロジェクトとは別リポジトリの
   **`C:\Users\t_oha\マネーフォワードのMCPテスト`**（Firebase Functions, Node.js 20, Express）が担う。
+  GitHubの非公開リポジトリ `oharamanezimentosystems/orochi-mf-accounting-api` で履歴を管理している（12-0章参照）。
   Firebaseプロジェクトは本アプリと同一の`orochi-tax-manager`（Hostingサイト名・Functions名のみ
   `mf-accounting-poc` / `mfAccountingApi`で分離）のため、同じFirestoreに直接読み書きできる
   （クロスプロジェクト認証は不要）。
@@ -361,6 +362,8 @@ Claude Code が顧問先の進捗とMF/アプリの入力状況をチェック�
 ### 12-0. 窓口（MCPサーバー `orochi-audit`）
 - 実体: 別リポジトリ `C:\Users\t_oha\マネーフォワードのMCPテスト\functions\src\auditMcp.js`（Firebase Functions `orochiAuditMcp`、
   `https://asia-northeast1-orochi-tax-manager.cloudfunctions.net/orochiAuditMcp`）。`mfAccountingApi` とは認証モデルが違うため別Functions（`bridge.js` と同じ考え方）。
+- リポジトリ: `https://github.com/oharamanezimentosystems/orochi-mf-accounting-api`（非公開。別フォルダ `マネーフォワードのMCPテスト` と同じ。2026-10-06にGit管理を開始）。
+  設定ファイル（`.env.*`）は管理の対象外。窓口を直したら、このフォルダでもコミット・pushする。
 - 認証: 事務所共通の合言葉（シークレット `AUDIT_MCP_KEY`、ヘッダ `x-audit-mcp-key`）。各PCは `claude mcp add` で1回登録する。
 - 機能: `list_clients` / `get_term_check` / `get_audit_records`（以上は読み取り専用）、`record_check_result`（履歴のみ書く）、`add_exception`（除外のみ書く。事務所の指示があったときだけ）。
 - MF/freeeへは**取得系だけ**を呼ぶ。書き込み（一括仕訳登録など）は窓口に存在しない。`clients` の入力データにも触れない。
