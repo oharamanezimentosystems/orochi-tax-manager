@@ -25,7 +25,7 @@ const AI_JUDGMENT_LABEL: Record<string, string> = {
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { db, auth } from '../../../lib/firebase';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, runTransaction } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
 // 店舗リスト（デフォルト初期値。実際の店舗はタスクごとに動的に保持する）
@@ -486,7 +486,16 @@ function DetailContent() {
   // デフォルト値がそのまま保存され、既存の顧客入力を全て上書き消去してしまう事故につながる
   // （実際に複数の顧問先でこの事故が発生したことが判明したため、安全装置として追加）。
   const [tasksReady, setTasksReady] = useState(false);
-  
+  // 非同期処理（MF自動取得など）は開始時点の古い値を持ち続けるため、保存の可否判定と
+  // 「今表示している期・年度」の確認には、常に最新を指すrefを使う。
+  const tasksReadyRef = useRef(false);
+  const viewRef = useRef({ term: activeTerm, year: currentYear });
+  viewRef.current = { term: activeTerm, year: currentYear };
+  // 期ごとの「読み込んだ時点の版番号」。別の画面が先に保存していて自分のコピーが古い場合、
+  // 保存時にこの番号がずれるため、古い内容での上書きを止められる。
+  const revRef = useRef<Record<string, number | null>>({});
+  const [staleNotice, setStaleNotice] = useState(false);
+
   // 印刷用ステート
   const [printTarget, setPrintTarget] = useState<'1' | '2' | '3' | 'yearly' | null>(null);
 
@@ -622,6 +631,9 @@ function DetailContent() {
       // 位置(position)キーに変換してtask No.7 details.mfDataへ自動反映・自動保存する。
       // MF・freeeいずれも{'YYYY-MM': {sales, purchase}}形式で返るため共通化している。
       const applyMonthlySalesAutoWrite = (salesData: Record<string, { sales: number; purchase: number }>) => {
+        // MF取得中に期タブ・年度を切り替えられていたら書き込まない（別の期の内容を
+        // 取得開始時の期の保存先へ上書きしてしまい、入力済みデータが消える事故の防止）。
+        if (viewRef.current.term !== activeTerm || viewRef.current.year !== currentYear || !tasksReadyRef.current) return;
         setTasks(prevTasks => {
           const nextTasks = prevTasks.map((t: any) => {
             if (t.no !== '7') return t;
@@ -815,13 +827,15 @@ function DetailContent() {
     } else {
       setTasks(baseTasks);
     }
+    revRef.current[`${termKey}_rev`] = data[`${termKey}_rev`] ?? null;
     // Firestoreとのマージが完了し、tasksが安全に保存対象になったことを示す。
+    tasksReadyRef.current = true;
     setTasksReady(true);
   };
 
   const saveDataToFirestore = async (currentTasks: any[], term: number, year: number, newClientStatus?: string) => {
     if (!clientId) return;
-    if (!tasksReady) {
+    if (!tasksReadyRef.current) {
       // Firestoreからの読み込み・マージが終わる前に呼ばれた保存は、まだ空/デフォルトの
       // tasksを書き込んで既存データを消してしまう危険があるため、必ず無視する。
       console.warn('saveDataToFirestore: tasksReadyになる前の保存要求を無視しました。');
@@ -865,7 +879,35 @@ function DetailContent() {
         updates[completedAtKey] = completedAtToSave;
       }
 
-      await updateDoc(docRef, updates);
+      // ★ 古い画面による上書きの防止: 保存の直前に最新の版番号を確認し、自分が読み込んだ時点から
+      // 他の画面が保存していたら、書き込まずに中断する（確認と書き込みは同じ取引内で行う）。
+      const revKey = `${termKey}_rev`;
+      const newRev = Date.now();
+      updates[revKey] = newRev;
+      const staleMarker = 'STALE_COPY';
+      try {
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(docRef);
+          const serverRev = snap.exists() ? (snap.data()[revKey] ?? null) : null;
+          if (serverRev !== (revRef.current[revKey] ?? null)) throw new Error(staleMarker);
+          tx.update(docRef, updates);
+        });
+      } catch (txError: any) {
+        if (txError?.message !== staleMarker) throw txError;
+        // 最新の内容を読み直して画面に反映する（古い内容で上書きしない）。
+        const freshSnap = await getDoc(docRef);
+        if (freshSnap.exists()) {
+          const fresh = freshSnap.data();
+          setFullData(fresh);
+          if (viewRef.current.term === term && viewRef.current.year === year) {
+            loadTasksForTerm(fresh, term, year);
+          }
+        }
+        setStaleNotice(true);
+        setSaveStatus('error');
+        return;
+      }
+      revRef.current[revKey] = newRev;
 
       setFullData((prev: any) => {
         const newYearData = prev[`year_${year}`] || {};
@@ -873,6 +915,7 @@ function DetailContent() {
         return {
           ...prev,
           [termKey]: cleanTasks,
+          [revKey]: newRev,
           [`year_${year}`]: {
             ...newYearData,
             [`term${term}`]: { 
@@ -1118,6 +1161,9 @@ function DetailContent() {
       autoSaveTimerRef.current = null;
       await saveDataToFirestore(tasks, activeTerm, currentYear);
     }
+    // 新しい年度のタスクを読み込み終えるまで、保存を止める。
+    tasksReadyRef.current = false;
+    setTasksReady(false);
     setCurrentYear(newYear);
   };
 
@@ -1540,6 +1586,13 @@ function DetailContent() {
               {saveStatus === 'saved' && <span className="text-sm text-gray-500 flex items-center gap-1 ml-2"><span className="w-2 h-2 bg-green-500 rounded-full"></span> 保存済</span>}
               {saveStatus === 'saving' && <span className="text-sm text-blue-400 flex items-center gap-1 ml-2 animate-pulse"><span className="w-2 h-2 bg-blue-400 rounded-full"></span> 保存中</span>}
               {saveStatus === 'changed' && <span className="text-sm text-yellow-500 flex items-center gap-1 ml-2"><span className="w-2 h-2 bg-yellow-500 rounded-full"></span> 待機中</span>}
+              {saveStatus === 'error' && <span className="text-sm text-red-400 flex items-center gap-1 ml-2"><span className="w-2 h-2 bg-red-500 rounded-full"></span> 保存できませんでした</span>}
+              {staleNotice && (
+                <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[100] bg-red-700 text-white text-sm px-4 py-3 rounded shadow-xl max-w-[90vw]">
+                  別の画面で先にデータが更新されていたため、上書きを止めて最新の内容に読み込み直しました。直前の入力が反映されていない場合は、お手数ですがもう一度ご入力ください。
+                  <button onClick={() => setStaleNotice(false)} className="ml-3 underline font-bold">閉じる</button>
+                </div>
+              )}
             </div>
 
             {/* ★ デバッグ用パネル（一時対応・isAdminのみ） */}
